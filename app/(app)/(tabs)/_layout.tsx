@@ -28,7 +28,7 @@ export default function TabsLayout() {
 						iconName = "circle"
 					}
 
-					return <MaterialCommunityIcons name={iconName} color={color} size={size} />
+					return <MaterialCommunityIcons name={iconName as keyof typeof MaterialCommunityIcons.glyphMap} color={color} size={size} />
 				},
 			})}
 		>
