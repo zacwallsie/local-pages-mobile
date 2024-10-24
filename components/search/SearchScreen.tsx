@@ -9,10 +9,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import * as Location from "expo-location"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import debounce from "lodash/debounce"
-import { ErrorBoundary } from "./ErrorBoundary"
+import { ErrorBoundary } from "../utils/ErrorBoundary"
 import { ServiceSelector } from "./ServiceSelector"
 import { Colors } from "@/constants/Colors"
 import { CustomMarker } from "./CustomMarker"
+import { ServiceCategory } from "@/types/supabase"
 
 // Types and Interfaces
 interface Coordinates {
@@ -50,10 +51,20 @@ const BRISBANE_BOUNDS = {
 	west: 152.8,
 }
 
-const SERVICES = ["Plumbing", "Electrical", "Cleaning", "Gardening", "Painting"] as const
+type ServiceType = keyof typeof ServiceCategory
 
-type ServiceType = (typeof SERVICES)[number]
+interface SearchHistory {
+	id: string
+	address: string
+	service: ServiceType
+	location: Coordinates
+	timestamp: number
+}
 
+interface SearchScreenProps {
+	onSearch?: (params: { address: string; service: ServiceType; location: Coordinates; query?: string }) => Promise<void>
+	onCompanySearch?: (params: { service: ServiceType; location: Coordinates; radius?: number }) => Promise<void>
+}
 interface SearchScreenProps {
 	onSearch?: (params: { address: string; service: ServiceType; location: Coordinates; query?: string }) => Promise<void>
 	onCompanySearch?: (params: { service: ServiceType; location: Coordinates; radius?: number }) => Promise<void>
@@ -82,12 +93,79 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 	const snapPoints = ["40%"]
 	const insets = useSafeAreaInsets()
 
-	// Effects
+	// Enhanced Helper Functions
+	const requestLocationPermission = async (): Promise<void> => {
+		try {
+			const { status } = await Location.requestForegroundPermissionsAsync()
+			setLocationPermission(status === "granted")
+
+			if (status === "granted") {
+				setLoading(true)
+				const location = await Location.getCurrentPositionAsync({})
+				const { latitude, longitude } = location.coords
+
+				if (isWithinBrisbaneBounds(latitude, longitude)) {
+					// Set the location and update map
+					const newLocation: Coordinates = { latitude, longitude }
+					setSelectedLocation(newLocation)
+
+					mapRef.current?.animateToRegion({
+						...newLocation,
+						latitudeDelta: 0.0922,
+						longitudeDelta: 0.0421,
+					})
+
+					// Get address for the location
+					try {
+						const response = await fetch(
+							`https://nominatim.openstreetmap.org/reverse?` + `format=json&lat=${latitude}&lon=${longitude}`,
+							{
+								headers: {
+									"Accept-Language": "en",
+									"User-Agent": "LocalPagesApp/1.0",
+								},
+							}
+						)
+
+						if (!response.ok) {
+							throw new Error("Failed to get address details")
+						}
+
+						const data = await response.json()
+						if (data.display_name) {
+							setAddress(data.display_name)
+							setSearchQuery(data.display_name)
+							setIsBottomSheetVisible(true)
+							bottomSheetRef.current?.expand()
+						}
+					} catch (err) {
+						console.error("Error getting address for current location:", err)
+						setError("Unable to get address for current location")
+					}
+				} else {
+					setError("Your current location is outside Brisbane")
+					// Set to Brisbane center as fallback
+					mapRef.current?.animateToRegion(BRISBANE_REGION)
+				}
+			} else {
+				// If permission denied, center on Brisbane
+				mapRef.current?.animateToRegion(BRISBANE_REGION)
+			}
+		} catch (err) {
+			console.warn("Error getting location:", err)
+			setError("Unable to access location services")
+			// Set to Brisbane center as fallback
+			mapRef.current?.animateToRegion(BRISBANE_REGION)
+		} finally {
+			setLoading(false)
+		}
+	}
+
+	// Enhanced initialization effect
 	useEffect(() => {
 		const initialize = async () => {
 			try {
-				await requestLocationPermission()
-				await loadSearchHistory()
+				await Promise.all([requestLocationPermission(), loadSearchHistory()])
 			} catch (err) {
 				console.error("Initialization error:", err)
 				setError("Failed to initialize app")
@@ -98,31 +176,6 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 
 		initialize()
 	}, [])
-
-	// Helper Functions
-	const requestLocationPermission = async (): Promise<void> => {
-		try {
-			const { status } = await Location.requestForegroundPermissionsAsync()
-			setLocationPermission(status === "granted")
-
-			if (status === "granted") {
-				const location = await Location.getCurrentPositionAsync({})
-				const { latitude, longitude } = location.coords
-
-				if (isWithinBrisbaneBounds(latitude, longitude)) {
-					mapRef.current?.animateToRegion({
-						latitude,
-						longitude,
-						latitudeDelta: 0.0922,
-						longitudeDelta: 0.0421,
-					})
-				}
-			}
-		} catch (err) {
-			console.warn("Error getting location:", err)
-			setError("Unable to access location services")
-		}
-	}
 
 	const isWithinBrisbaneBounds = (lat: number, lon: number): boolean => {
 		return lat >= BRISBANE_BOUNDS.south && lat <= BRISBANE_BOUNDS.north && lon >= BRISBANE_BOUNDS.west && lon <= BRISBANE_BOUNDS.east
@@ -349,45 +402,87 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 						)}
 					</MapView>
 
-					{/* Search Container */}
-					<View style={[styles.searchContainer, { paddingTop: insets.top }]}>
-						<View style={styles.searchRow}>
-							<TextInput
-								mode="outlined"
-								placeholder="Search for an address in Brisbane"
-								value={searchQuery}
-								onChangeText={(text) => {
-									setSearchQuery(text)
-									searchAddress(text)
-								}}
-								right={loading ? <TextInput.Icon icon="loading" /> : null}
-								style={styles.searchInput}
-							/>
-							<TouchableOpacity style={styles.historyButton} onPress={() => setShowHistory(true)}>
-								<MaterialCommunityIcons name="history" size={24} color={Colors.blue.DEFAULT} />
-							</TouchableOpacity>
-						</View>
+					{/* Bottom Sheet */}
+					{isBottomSheetVisible && (
+						<BottomSheet
+							ref={bottomSheetRef}
+							snapPoints={snapPoints}
+							enablePanDownToClose={false}
+							index={0}
+							style={styles.bottomSheet}
+							handleIndicatorStyle={styles.bottomSheetIndicator}
+						>
+							<BottomSheetView style={styles.bottomSheetContent}>
+								{/* Search Container moved inside bottom sheet */}
+								<View style={styles.searchSection}>
+									<View style={styles.searchRow}>
+										<TextInput
+											mode="outlined"
+											placeholder="Search for an address in Brisbane"
+											value={searchQuery}
+											onChangeText={(text) => {
+												setSearchQuery(text)
+												searchAddress(text)
+											}}
+											right={loading ? <TextInput.Icon icon="loading" /> : null}
+											style={styles.searchInput}
+										/>
+										<TouchableOpacity style={styles.historyButton} onPress={() => setShowHistory(true)}>
+											<MaterialCommunityIcons name="history" size={24} color={Colors.blue.DEFAULT} />
+										</TouchableOpacity>
+									</View>
 
-						{showSearchResults && searchResults.length > 0 && (
-							<View style={styles.searchResults}>
-								{searchResults.map((result) => (
-									<List.Item
-										key={result.place_id}
-										title={result.display_name}
-										onPress={() => handleLocationSelect(result)}
-										style={styles.searchResultItem}
-										titleNumberOfLines={2}
-										titleStyle={styles.searchResultText}
-									/>
-								))}
-							</View>
-						)}
-					</View>
+									{showSearchResults && searchResults.length > 0 && (
+										<View style={styles.searchResults}>
+											{searchResults.map((result) => (
+												<List.Item
+													key={result.place_id}
+													title={result.display_name}
+													onPress={() => handleLocationSelect(result)}
+													style={styles.searchResultItem}
+													titleNumberOfLines={2}
+													titleStyle={styles.searchResultText}
+												/>
+											))}
+										</View>
+									)}
+								</View>
 
-					{/* History Button */}
-					<TouchableOpacity style={[styles.historyButton, { top: insets.top + 10 }]} onPress={() => setShowHistory(true)}>
-						<MaterialCommunityIcons name="history" size={24} color="white" />
-					</TouchableOpacity>
+								<View style={styles.divider} />
+
+								<ServiceSelector
+									value={service}
+									onSelect={(value) => setService(value)}
+									visible={showServiceSelector}
+									onDismiss={() => setShowServiceSelector(false)}
+									onShow={() => setShowServiceSelector(true)}
+								/>
+
+								<View style={styles.buttonContainer}>
+									<Button
+										mode="contained"
+										onPress={handleCompanySearch}
+										loading={loading}
+										disabled={loading || !address || !service}
+										style={styles.primaryButton}
+										icon="magnify"
+									>
+										Find Companies
+									</Button>
+
+									<Button
+										mode="outlined"
+										onPress={handleSearch}
+										loading={loading}
+										disabled={loading || !address || !service}
+										style={styles.secondaryButton}
+									>
+										Save Location
+									</Button>
+								</View>
+							</BottomSheetView>
+						</BottomSheet>
+					)}
 
 					{/* History Modal */}
 					<Portal>
@@ -410,54 +505,6 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 							)}
 						</Modal>
 					</Portal>
-
-					{/* Bottom Sheet */}
-					{isBottomSheetVisible && (
-						<BottomSheet
-							ref={bottomSheetRef}
-							snapPoints={snapPoints}
-							enablePanDownToClose={false}
-							index={0}
-							style={styles.bottomSheet}
-							handleIndicatorStyle={styles.bottomSheetIndicator}
-						>
-							<BottomSheetView style={styles.bottomSheetContent}>
-								<TextInput label="Selected Address" value={address} style={styles.input} mode="outlined" disabled />
-
-								<ServiceSelector
-									value={service}
-									onSelect={(value) => setService(value as ServiceType)}
-									services={SERVICES}
-									visible={showServiceSelector}
-									onDismiss={() => setShowServiceSelector(false)}
-									onShow={() => setShowServiceSelector(true)}
-								/>
-
-								<View style={styles.buttonContainer}>
-									<Button
-										mode="contained"
-										onPress={handleSearch}
-										loading={loading}
-										disabled={loading || !address || !service}
-										style={[styles.button, styles.saveButton]}
-									>
-										Save Location
-									</Button>
-
-									<Button
-										mode="contained"
-										onPress={handleCompanySearch}
-										loading={loading}
-										disabled={loading || !address || !service}
-										style={[styles.button, styles.searchButton]}
-										icon="magnify"
-									>
-										Find Companies
-									</Button>
-								</View>
-							</BottomSheetView>
-						</BottomSheet>
-					)}
 
 					{/* Loading Modal */}
 					{loading && (
@@ -488,6 +535,42 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 }
 
 const styles = StyleSheet.create({
+	searchSection: {
+		marginBottom: 16,
+	},
+	searchRow: {
+		flexDirection: "row",
+		alignItems: "center",
+		gap: 8,
+		marginBottom: 8,
+	},
+	searchInput: {
+		flex: 1,
+		backgroundColor: Colors.white,
+	},
+	divider: {
+		height: 1,
+		backgroundColor: Colors.blue.lightest,
+		marginVertical: 16,
+	},
+	buttonContainer: {
+		gap: 12,
+		marginTop: 16,
+	},
+	primaryButton: {
+		backgroundColor: Colors.blue.DEFAULT,
+		paddingVertical: 8,
+	},
+	secondaryButton: {
+		borderColor: Colors.blue.DEFAULT,
+		borderWidth: 2,
+	},
+	bottomSheetContent: {
+		flex: 1,
+		padding: 16,
+		backgroundColor: Colors.white,
+	},
+
 	container: {
 		flex: 1,
 		backgroundColor: Colors.offwhite,
@@ -513,15 +596,6 @@ const styles = StyleSheet.create({
 		width: "100%",
 		padding: 10,
 		zIndex: 1,
-	},
-	searchRow: {
-		flexDirection: "row",
-		alignItems: "center",
-		gap: 8,
-	},
-	searchInput: {
-		flex: 1,
-		backgroundColor: Colors.white,
 	},
 	historyButton: {
 		width: 44,
@@ -614,19 +688,9 @@ const styles = StyleSheet.create({
 		alignSelf: "center",
 		marginTop: 8,
 	},
-	bottomSheetContent: {
-		flex: 1,
-		padding: 16,
-		backgroundColor: Colors.white,
-	},
 	input: {
 		marginBottom: 16,
 		backgroundColor: Colors.offwhite,
-	},
-	buttonContainer: {
-		flexDirection: "row",
-		justifyContent: "space-between",
-		marginTop: 16,
 	},
 	button: {
 		flex: 1,

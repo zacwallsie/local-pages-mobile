@@ -1,28 +1,42 @@
 import React from "react"
-import { View, StyleSheet, TouchableOpacity } from "react-native"
-import { Text, Portal, Modal, List } from "react-native-paper"
+import { View, StyleSheet, TouchableOpacity, ScrollView } from "react-native"
+import { Text, Portal, Modal } from "react-native-paper"
 import { MaterialCommunityIcons } from "@expo/vector-icons"
 import { Colors } from "@/constants/Colors"
+import { ServiceCategory } from "@/types/supabase"
+
+type ServiceType = keyof typeof ServiceCategory
 
 interface ServiceSelectorProps {
-	value: string
-	onSelect: (service: string) => void
-	services: readonly string[]
+	value: ServiceType | ""
+	onSelect: (service: ServiceType) => void
 	visible: boolean
 	onDismiss: () => void
 	onShow: () => void
 }
 
-export const ServiceSelector = ({ value, onSelect, services, visible, onDismiss, onShow }: ServiceSelectorProps) => {
-	const getServiceIcon = (service: string) => {
-		const icons: Record<string, "pipe" | "lightning-bolt" | "broom" | "tree" | "brush" | "tools"> = {
-			Plumbing: "pipe",
-			Electrical: "lightning-bolt",
-			Cleaning: "broom",
-			Gardening: "tree",
-			Painting: "brush",
+export const ServiceSelector = ({ value, onSelect, visible, onDismiss, onShow }: ServiceSelectorProps) => {
+	const getServiceIcon = (service: ServiceType | ""): string => {
+		const icons: Record<ServiceType, string> = {
+			HOME_SERVICES: "home",
+			PROFESSIONAL_SERVICES: "briefcase",
+			HEALTH_AND_WELLNESS: "heart",
+			AUTOMOTIVE: "car",
+			BEAUTY_AND_PERSONAL_CARE: "scissors-cutting",
+			PET_SERVICES: "paw",
+			EDUCATION_AND_TUTORING: "school",
+			TECHNOLOGY_SERVICES: "laptop",
+			EVENT_SERVICES: "party-popper",
+			CLEANING_SERVICES: "spray",
+			MOVING_AND_STORAGE: "truck",
+			FITNESS_AND_RECREATION: "dumbbell",
 		}
-		return icons[service] || "tools"
+		return service ? icons[service] : "tools"
+	}
+
+	const getDisplayName = (service: ServiceType | "") => {
+		if (!service) return "Select a service"
+		return ServiceCategory[service].displayName
 	}
 
 	return (
@@ -30,37 +44,46 @@ export const ServiceSelector = ({ value, onSelect, services, visible, onDismiss,
 			<TouchableOpacity onPress={onShow} style={selectorStyles.selectorButton}>
 				<View style={selectorStyles.selectorLeft}>
 					<MaterialCommunityIcons
-						name={value ? getServiceIcon(value) : "tools"}
+						name={value ? (getServiceIcon(value) as keyof typeof MaterialCommunityIcons.glyphMap) : "tools"}
 						size={24}
 						color={value ? Colors.blue.DEFAULT : Colors.slate.DEFAULT}
 					/>
-					<Text style={[selectorStyles.selectorText, !value && selectorStyles.selectorPlaceholder]}>{value || "Select a service"}</Text>
+					<Text style={[selectorStyles.selectorText, !value && selectorStyles.selectorPlaceholder]}>{getDisplayName(value)}</Text>
 				</View>
 				<MaterialCommunityIcons name="chevron-down" size={24} color={Colors.slate.DEFAULT} />
 			</TouchableOpacity>
 
 			<Portal>
 				<Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={selectorStyles.modalContent}>
-					<View style={selectorStyles.modalHeader}>
-						<Text style={selectorStyles.modalTitle}>Select Service</Text>
-					</View>
-					{services.map((service) => (
-						<TouchableOpacity
-							key={service}
-							style={[selectorStyles.serviceItem, service === value && selectorStyles.selectedService]}
-							onPress={() => {
-								onSelect(service)
-								onDismiss()
-							}}
+					<View style={selectorStyles.modalContainer}>
+						<View style={selectorStyles.modalHeader}>
+							<Text style={selectorStyles.modalTitle}>Select Service</Text>
+						</View>
+
+						<ScrollView
+							style={selectorStyles.scrollView}
+							showsVerticalScrollIndicator={true}
+							contentContainerStyle={selectorStyles.scrollViewContent}
 						>
-							<MaterialCommunityIcons
-								name={getServiceIcon(service)}
-								size={24}
-								color={service === value ? Colors.blue.DEFAULT : Colors.slate.DEFAULT}
-							/>
-							<Text style={selectorStyles.serviceText}>{service}</Text>
-						</TouchableOpacity>
-					))}
+							{Object.entries(ServiceCategory).map(([key, category]) => (
+								<TouchableOpacity
+									key={key}
+									style={[selectorStyles.serviceItem, key === value && selectorStyles.selectedService]}
+									onPress={() => {
+										onSelect(key as ServiceType)
+										onDismiss()
+									}}
+								>
+									<MaterialCommunityIcons
+										name={getServiceIcon(key as ServiceType) as keyof typeof MaterialCommunityIcons.glyphMap}
+										size={24}
+										color={key === value ? Colors.blue.DEFAULT : Colors.slate.DEFAULT}
+									/>
+									<Text style={selectorStyles.serviceText}>{category.displayName}</Text>
+								</TouchableOpacity>
+							))}
+						</ScrollView>
+					</View>
 				</Modal>
 			</Portal>
 		</View>
@@ -92,22 +115,33 @@ const selectorStyles = StyleSheet.create({
 		color: Colors.slate.DEFAULT,
 	},
 	modalContent: {
-		backgroundColor: Colors.white,
 		margin: 20,
-		padding: 16,
-		borderRadius: 12,
+		backgroundColor: "transparent",
 		maxHeight: "80%",
 	},
+	modalContainer: {
+		backgroundColor: Colors.white,
+		borderRadius: 12,
+		overflow: "hidden",
+		maxHeight: "100%",
+	},
 	modalHeader: {
+		padding: 16,
 		borderBottomWidth: 1,
 		borderBottomColor: Colors.blue.lightest,
-		paddingBottom: 16,
-		marginBottom: 8,
+		backgroundColor: Colors.white,
 	},
 	modalTitle: {
 		fontSize: 18,
 		fontWeight: "600",
 		color: Colors.dark_blue.DEFAULT,
+	},
+	scrollView: {
+		maxHeight: 400, // Set a maximum height for the scrollable area
+	},
+	scrollViewContent: {
+		padding: 16,
+		paddingTop: 8,
 	},
 	serviceItem: {
 		flexDirection: "row",
