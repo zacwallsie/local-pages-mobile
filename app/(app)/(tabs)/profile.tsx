@@ -28,7 +28,7 @@ export default function ProfileScreen() {
 		if (error) {
 			alert(error.message)
 		} else {
-			router.replace("/sign-in")
+			router.replace("/")
 		}
 	}
 

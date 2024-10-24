@@ -1,4 +1,4 @@
-// app/auth/sign-up.tsx
+// app/auth/sign-in.tsx
 
 import React, { useState } from "react"
 import { View, StyleSheet } from "react-native"
@@ -7,22 +7,24 @@ import { Link, useRouter } from "expo-router"
 import { TextInput, Button, Text, HelperText, Card } from "react-native-paper"
 import { Colors } from "@/constants/Colors"
 
-export default function SignUpScreen() {
+export default function SignInScreen() {
 	const [email, setEmail] = useState("")
 	const [password, setPassword] = useState("")
+	const router = useRouter()
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState("")
-	const router = useRouter()
 
-	const handleSignUp = async () => {
+	const handleSignIn = async () => {
 		setLoading(true)
 		setError("")
-		const { error } = await supabase.auth.signUp({ email, password })
+		const { data, error } = await supabase.auth.signInWithPassword({
+			email,
+			password,
+		})
 		if (error) {
 			setError(error.message)
 		} else {
-			alert("Check your email for the confirmation link!")
-			router.replace("/")
+			router.replace("/search")
 		}
 		setLoading(false)
 	}
@@ -32,7 +34,7 @@ export default function SignUpScreen() {
 			<Card style={styles.card}>
 				<Card.Content style={styles.cardContent}>
 					<Text variant="headlineMedium" style={styles.title}>
-						Create Account
+						Welcome Back
 					</Text>
 					<TextInput
 						label="Email"
@@ -47,20 +49,20 @@ export default function SignUpScreen() {
 					{error ? <HelperText type="error">{error}</HelperText> : null}
 					<Button
 						mode="contained"
-						onPress={handleSignUp}
+						onPress={handleSignIn}
 						style={styles.button}
 						loading={loading}
 						disabled={loading}
 						contentStyle={styles.buttonContent}
 					>
-						Sign Up
+						Sign In
 					</Button>
 				</Card.Content>
 			</Card>
 
-			<Button mode="text" style={styles.link} onPress={() => router.replace("/")}>
+			<Button mode="text" style={styles.link} onPress={() => router.replace("/sign-up")}>
 				<Text variant="bodyLarge" style={styles.linkText}>
-					Already have an account? Sign In
+					Don't have an account? Sign Up
 				</Text>
 			</Button>
 		</View>

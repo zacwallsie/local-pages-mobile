@@ -11,7 +11,7 @@ export default function AppLayout() {
 		const checkSession = async () => {
 			const { data } = await supabase.auth.getSession()
 			if (!data.session) {
-				router.replace("/sign-in") // Redirect to auth if no session
+				router.replace("/") // Redirect to auth if no session
 			}
 		}
 
@@ -19,7 +19,7 @@ export default function AppLayout() {
 
 		const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
 			if (!session) {
-				router.replace("/sign-in")
+				router.replace("/")
 			}
 		})
 
