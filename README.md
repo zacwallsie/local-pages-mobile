@@ -1,50 +1,65 @@
-# Welcome to your Expo app 👋
+# Local Pages Mobile
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Local Pages Mobile is a React Native Expo application that allows users to search through companies that provide specific services to specific locations. These companies are created in the Next.js related app which allows companies to showcase their services and the specific areas they service.
 
-## Get started
+## Getting Started
 
-1. Install dependencies
+### Installation
 
-   ```bash
-   npm install
-   ```
+1. Extract the provided zip file containing the project files.
 
-2. Start the app
+2. Navigate to the project directory:
 
-   ```bash
-    npx expo start
-   ```
+    ```
+    cd local-pages-mobile
+    ```
+
+3. Install dependencies
+
+    ```bash
+    npm install
+    ```
+
+4. Start the app
+
+    ```bash
+     npx expo start
+    ```
+
+    OR
+
+    ```bash
+    npm run start
+    ```
 
 In the output, you'll find options to open the app in a
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+-   [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+-   [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+-   [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+-   [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
 You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## Get a fresh project
+#### Please Note: IOS simulator was primarily used for development.
 
-When you're ready, run:
+### Environment Setup
 
-```bash
-npm run reset-project
-```
+Public Supabase Keys are used throughout the application and as such no `.env.local` file is required as the keys can be actively exposed due to row level security (RLS) being deployed.
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Backend
 
-## Learn more
+The backend of this application is developed using Supabase.
 
-To learn more about developing your project with Expo, look at the following resources:
+## Test Account
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+A test account has been set up with the following credentials:
 
-## Join the community
+-   Username: zacwalls20@gmail.com
+-   Password: #Testing123
 
-Join our community of developers creating universal apps.
+You can use this account to explore the application's features.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## References
+
+During the development of this project, Claude 3.5, an AI assistant, was used for general brainstorming and docstring generation. This tool helped in conceptualizing various aspects of the application and organizing its structure effectively.

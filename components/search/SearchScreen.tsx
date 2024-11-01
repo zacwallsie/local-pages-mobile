@@ -14,6 +14,7 @@ import { Colors } from "@/constants/Colors"
 import { CustomMarker } from "./CustomMarker"
 import { ServiceCategory, ServiceCategoryKey, Company } from "@/types/supabase"
 import { CompanyList } from "@/components/search/CompaniesList"
+import { searchServiceAreas } from "@/utils/searchServiceAreas"
 
 // Types and Interfaces
 type ServiceType = keyof typeof ServiceCategory
@@ -40,7 +41,6 @@ interface SearchHistory {
 
 interface SearchScreenProps {
 	onSearch?: (params: { address: string; service: ServiceCategoryKey; location: Coordinates; query?: string }) => Promise<void>
-	onCompanySearch: (params: { service: ServiceCategoryKey; location: Coordinates; radius?: number }) => Promise<Company[]>
 }
 
 // Constants
@@ -132,7 +132,7 @@ const HistoryModal: React.FC<{
  * SearchScreen Component
  * A complex search interface combining map selection, address search, and service selection.
  */
-const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }) => {
+const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch }) => {
 	// State Management
 	const [mapState, setMapState] = useState({
 		selectedLocation: null as Coordinates | null,
@@ -161,6 +161,18 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 	const mapRef = useRef<MapView | null>(null)
 	const bottomSheetRef = useRef<BottomSheet | null>(null)
 	const snapPoints = ["40%"]
+
+	const [loadingStates, setLoadingStates] = useState({
+		addressSearch: false,
+		companySearch: false,
+		initialization: true,
+		locationUpdate: false,
+	})
+
+	// Helper function to update loading states
+	const updateLoadingState = (key: keyof typeof loadingStates, value: boolean) => {
+		setLoadingStates((prev) => ({ ...prev, [key]: value }))
+	}
 
 	// Location Services
 	const requestLocationPermission = useCallback(async () => {
@@ -291,6 +303,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 	// Location Update Handler
 	const handleLocationUpdate = async (coordinate: Coordinates) => {
 		try {
+			updateLoadingState("locationUpdate", true)
 			setMapState((prev) => ({ ...prev, selectedLocation: coordinate }))
 
 			mapRef.current?.animateToRegion({
@@ -327,6 +340,8 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 				...prev,
 				error: "Error getting address details",
 			}))
+		} finally {
+			updateLoadingState("locationUpdate", false)
 		}
 	}
 
@@ -355,11 +370,15 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 		setUiState((prev) => ({ ...prev, loading: true }))
 
 		try {
-			const companies = await onCompanySearch({
-				service: mapState.service as ServiceCategoryKey,
+			const { companies, error } = await searchServiceAreas({
 				location: mapState.selectedLocation,
+				service: mapState.service as ServiceCategoryKey,
 				radius: 0,
 			})
+
+			if (error) {
+				throw error
+			}
 
 			if (!companies || companies.length === 0) {
 				setUiState((prev) => ({
@@ -427,6 +446,14 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 							</Marker>
 						)}
 					</MapView>
+
+					{/* Guide message */}
+					{!mapState.selectedLocation && (
+						<View style={styles.guideContainer}>
+							<MaterialCommunityIcons name="map-marker-plus" size={24} color={Colors.blue.DEFAULT} />
+							<Text style={styles.guideText}>Tap anywhere to start searching</Text>
+						</View>
+					)}
 
 					{uiState.isBottomSheetVisible && (
 						<BottomSheet
@@ -633,6 +660,35 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }
 
 // Styles
 const styles = StyleSheet.create({
+	guideContainer: {
+		position: "absolute",
+		top: Platform.OS === "ios" ? 60 : 40,
+		left: 20,
+		right: 20,
+		backgroundColor: Colors.white,
+		padding: 12,
+		borderRadius: 8,
+		flexDirection: "row",
+		alignItems: "center",
+		shadowColor: Colors.darks.darkest,
+		shadowOffset: {
+			width: 0,
+			height: 2,
+		},
+		shadowOpacity: 0.25,
+		shadowRadius: 3.84,
+		elevation: 5,
+	},
+	guideText: {
+		flex: 1,
+		fontSize: 16,
+		color: Colors.dark_blue.DEFAULT,
+		marginLeft: 8,
+	},
+	guideIcon: {
+		width: 24,
+		height: 24,
+	},
 	historyModal: {
 		margin: 20,
 		maxHeight: "80%",
