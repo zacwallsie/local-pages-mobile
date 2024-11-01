@@ -1,4 +1,3 @@
-// src/hooks/useAuthRedirect.ts
 import { useEffect } from "react"
 import { useRouter } from "expo-router"
 import { Session } from "@supabase/supabase-js"
@@ -6,11 +5,17 @@ import { supabase } from "@/supabase"
 import { userService } from "@/services/user"
 
 /**
- * Custom hook to handle authentication state and routing
+ * Custom hook that manages authentication-based routing.
+ * Redirects authenticated users based on their mobile user profile status.
+ * Routes to /search if mobile profile exists, otherwise to /mobile-sign-up.
  */
 export const useAuthRedirect = () => {
 	const router = useRouter()
 
+	/**
+	 * Handles authentication state changes and performs appropriate redirects
+	 * @param {Session | null} session - Current authentication session
+	 */
 	const handleAuthStateChange = async (session: Session | null) => {
 		if (!session) return
 
@@ -23,6 +28,9 @@ export const useAuthRedirect = () => {
 	}
 
 	useEffect(() => {
+		/**
+		 * Initializes authentication state and performs initial routing
+		 */
 		const initializeAuth = async () => {
 			try {
 				const { data } = await supabase.auth.getSession()
@@ -36,12 +44,14 @@ export const useAuthRedirect = () => {
 
 		initializeAuth()
 
+		// Set up authentication state change listener
 		const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
 			if (session) {
 				await handleAuthStateChange(session)
 			}
 		})
 
+		// Cleanup subscription on unmount
 		return () => {
 			authListener.subscription.unsubscribe()
 		}

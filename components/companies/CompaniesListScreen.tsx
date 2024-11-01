@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react"
+import React, { useEffect, useState, useCallback } from "react"
 import {
 	View,
 	ScrollView,
@@ -9,13 +9,11 @@ import {
 	Platform,
 	StatusBar,
 } from "react-native"
-import { TextInput, Button, Text, Chip, Avatar, Card, Searchbar, Portal, Modal } from "react-native-paper"
+import { Button, Text, Chip, Avatar, Card, Searchbar, Portal, Modal } from "react-native-paper"
 import { MaterialCommunityIcons } from "@expo/vector-icons"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import debounce from "lodash/debounce"
-import { ErrorBoundary } from "@/components/common/ErrorBoundary"
 import { Colors } from "@/constants/Colors"
-import { ServiceCategory, Company, ServiceCategoryKey } from "@/types/supabase"
+import { ServiceCategory, ServiceCategoryKey, Company } from "@/types/supabase"
 import { searchCompanies, CompanyWithServices } from "@/utils/searchCompanies"
 import { router } from "expo-router"
 
@@ -26,44 +24,66 @@ interface CompanyListScreenProps {
 	onCompanySelect?: (companyId: string) => void
 }
 
-// Get all services from ServiceCategory
+interface CompanyCardProps {
+	company: CompanyWithServices
+}
+
+interface ServiceFilterProps {
+	selectedServices: ServiceCategoryKey[]
+	onToggleService: (service: ServiceCategoryKey) => void
+}
+
+interface ErrorModalProps {
+	error: string
+	onDismiss: () => void
+}
+
+// Constants
 const SERVICES = Object.entries(ServiceCategory).map(([key, value]) => ({
 	key: key as ServiceType,
 	...value,
 }))
 
-// Helper function to get icon for service
-const getServiceIcon = (service: ServiceType): string => {
-	const icons: Record<ServiceType, string> = {
-		HOME_SERVICES: "home",
-		PROFESSIONAL_SERVICES: "briefcase",
-		HEALTH_AND_WELLNESS: "heart",
-		AUTOMOTIVE: "car",
-		BEAUTY_AND_PERSONAL_CARE: "scissors-cutting",
-		PET_SERVICES: "paw",
-		EDUCATION_AND_TUTORING: "school",
-		TECHNOLOGY_SERVICES: "laptop",
-		EVENT_SERVICES: "party-popper",
-		CLEANING_SERVICES: "spray",
-		MOVING_AND_STORAGE: "truck",
-		FITNESS_AND_RECREATION: "dumbbell",
-	}
-	return icons[service] || "tools"
+const SERVICE_ICONS: Record<ServiceType, string> = {
+	HOME_SERVICES: "home",
+	PROFESSIONAL_SERVICES: "briefcase",
+	HEALTH_AND_WELLNESS: "heart",
+	AUTOMOTIVE: "car",
+	BEAUTY_AND_PERSONAL_CARE: "scissors-cutting",
+	PET_SERVICES: "paw",
+	EDUCATION_AND_TUTORING: "school",
+	TECHNOLOGY_SERVICES: "laptop",
+	EVENT_SERVICES: "party-popper",
+	CLEANING_SERVICES: "spray",
+	MOVING_AND_STORAGE: "truck",
+	FITNESS_AND_RECREATION: "dumbbell",
 }
 
-const CompanyCard = ({ company }: { company: CompanyWithServices }) => (
-	<Card
-		style={styles.companyCard}
-		onPress={() => {
-			router.push({
-				pathname: "/companies/[id]",
-				params: {
-					id: company.id,
-					company: JSON.stringify(company),
-				},
-			})
-		}}
-	>
+// Pure Functions
+/**
+ * Returns the icon name for a given service type
+ */
+const getServiceIcon = (service: ServiceType): string => SERVICE_ICONS[service] || "tools"
+
+/**
+ * Navigates to company detail screen
+ */
+const navigateToCompanyDetail = (company: CompanyWithServices): void => {
+	router.push({
+		pathname: "/companies/[id]",
+		params: {
+			id: company.id,
+			company: JSON.stringify(company),
+		},
+	})
+}
+
+// Component Functions
+/**
+ * Renders a company card with company information and services
+ */
+const CompanyCard: React.FC<CompanyCardProps> = ({ company }) => (
+	<Card style={styles.companyCard} onPress={() => navigateToCompanyDetail(company)}>
 		<Card.Title
 			title={company.company_name}
 			subtitle={company.address || "Location not specified"}
@@ -95,8 +115,47 @@ const CompanyCard = ({ company }: { company: CompanyWithServices }) => (
 	</Card>
 )
 
-function CompanyListScreen({ onCompanySelect }: CompanyListScreenProps) {
-	const insets = useSafeAreaInsets()
+/**
+ * Service filter component for filtering companies by service type
+ */
+const ServiceFilter: React.FC<ServiceFilterProps> = ({ selectedServices, onToggleService }) => (
+	<ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.serviceFiltersScroll}>
+		<View style={styles.serviceFilters}>
+			{Object.entries(ServiceCategory).map(([key, value]) => (
+				<Chip
+					key={key}
+					selected={selectedServices.includes(key as ServiceCategoryKey)}
+					onPress={() => onToggleService(key as ServiceCategoryKey)}
+					style={[styles.filterChip, selectedServices.includes(key as ServiceCategoryKey) && styles.filterChipSelected]}
+					textStyle={[styles.filterChipText, selectedServices.includes(key as ServiceCategoryKey) && styles.filterChipTextSelected]}
+				>
+					{value.displayName}
+				</Chip>
+			))}
+		</View>
+	</ScrollView>
+)
+
+/**
+ * Error modal component for displaying error messages
+ */
+const ErrorModal: React.FC<ErrorModalProps> = ({ error, onDismiss }) => (
+	<Portal>
+		<Modal visible={!!error} onDismiss={onDismiss} contentContainerStyle={styles.errorModal}>
+			<Text style={styles.errorText}>{error}</Text>
+			<Button mode="contained" onPress={onDismiss} style={styles.errorButton}>
+				OK
+			</Button>
+		</Modal>
+	</Portal>
+)
+
+/**
+ * Main CompanyListScreen component
+ * Displays a searchable, filterable list of companies with their services
+ */
+const CompanyListScreen: React.FC<CompanyListScreenProps> = ({ onCompanySelect }) => {
+	// State
 	const [searchQuery, setSearchQuery] = useState("")
 	const [selectedServices, setSelectedServices] = useState<ServiceCategoryKey[]>([])
 	const [loading, setLoading] = useState(false)
@@ -104,7 +163,9 @@ function CompanyListScreen({ onCompanySelect }: CompanyListScreenProps) {
 	const [error, setError] = useState("")
 	const [companies, setCompanies] = useState<CompanyWithServices[]>([])
 
-	// Search Handler
+	const insets = useSafeAreaInsets()
+
+	// Handlers
 	const handleSearch = useCallback(async () => {
 		try {
 			const { companies: searchResults, error } = await searchCompanies(searchQuery, selectedServices)
@@ -119,7 +180,20 @@ function CompanyListScreen({ onCompanySelect }: CompanyListScreenProps) {
 		}
 	}, [searchQuery, selectedServices])
 
-	// Effect to handle search with debounce
+	const handleRefresh = useCallback(async () => {
+		setRefreshing(true)
+		try {
+			await handleSearch()
+		} finally {
+			setRefreshing(false)
+		}
+	}, [handleSearch])
+
+	const toggleService = useCallback((service: ServiceCategoryKey) => {
+		setSelectedServices((prev) => (prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service]))
+	}, [])
+
+	// Effects
 	useEffect(() => {
 		const timeoutId = setTimeout(() => {
 			if (!refreshing) {
@@ -131,99 +205,65 @@ function CompanyListScreen({ onCompanySelect }: CompanyListScreenProps) {
 		return () => clearTimeout(timeoutId)
 	}, [searchQuery, selectedServices, handleSearch, refreshing])
 
-	// Initial load
 	useEffect(() => {
 		setLoading(true)
 		handleSearch().finally(() => setLoading(false))
 	}, [])
 
-	// Refresh Handler
-	const handleRefresh = useCallback(async () => {
-		setRefreshing(true)
-		try {
-			await handleSearch()
-		} finally {
-			setRefreshing(false)
+	// Render Helpers
+	const renderContent = () => {
+		if (loading && !refreshing) {
+			return (
+				<View style={styles.loadingContainer}>
+					<RNActivityIndicator size="large" color={Colors.blue.DEFAULT} />
+				</View>
+			)
 		}
-	}, [handleSearch])
 
-	// Service Selection Handler
-	const toggleService = (service: ServiceCategoryKey) => {
-		setSelectedServices((prev) => (prev.includes(service) ? prev.filter((s) => s !== service) : [...prev, service]))
+		if (companies.length === 0) {
+			return (
+				<View style={styles.emptyState}>
+					<MaterialCommunityIcons name="database-search" size={48} color={Colors.slate.DEFAULT} />
+					<Text style={styles.emptyStateText}>No companies found</Text>
+				</View>
+			)
+		}
+
+		return (
+			<ScrollView
+				style={styles.companiesList}
+				contentContainerStyle={styles.companiesListContent}
+				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[Colors.blue.DEFAULT]} />}
+			>
+				{companies.map((company) => (
+					<CompanyCard key={company.id} company={company} />
+				))}
+			</ScrollView>
+		)
 	}
 
 	return (
 		<SafeAreaView style={[styles.safeArea, { paddingTop: Math.max(insets.top, 20) }]}>
 			<View style={styles.container}>
-				{/* Search Section with extra padding for older devices */}
 				<View style={[styles.searchSection, Platform.OS === "android" && { paddingTop: StatusBar.currentHeight || 20 }]}>
 					<Text style={styles.title}>Companies</Text>
 					<Searchbar placeholder="Search companies" onChangeText={setSearchQuery} value={searchQuery} style={styles.searchBar} />
-
-					<ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.serviceFiltersScroll}>
-						<View style={styles.serviceFilters}>
-							{Object.entries(ServiceCategory).map(([key, value]) => (
-								<Chip
-									key={key}
-									selected={selectedServices.includes(key as ServiceCategoryKey)}
-									onPress={() => toggleService(key as ServiceCategoryKey)}
-									style={[styles.filterChip, selectedServices.includes(key as ServiceCategoryKey) && styles.filterChipSelected]}
-									textStyle={[
-										styles.filterChipText,
-										selectedServices.includes(key as ServiceCategoryKey) && styles.filterChipTextSelected,
-									]}
-								>
-									{value.displayName}
-								</Chip>
-							))}
-						</View>
-					</ScrollView>
+					<ServiceFilter selectedServices={selectedServices} onToggleService={toggleService} />
 				</View>
 
-				{/* Rest of your content remains the same */}
-				{loading && !refreshing ? (
-					<View style={styles.loadingContainer}>
-						<RNActivityIndicator size="large" color={Colors.blue.DEFAULT} />
-					</View>
-				) : companies.length === 0 ? (
-					<View style={styles.emptyState}>
-						<MaterialCommunityIcons name="database-search" size={48} color={Colors.slate.DEFAULT} />
-						<Text style={styles.emptyStateText}>No companies found</Text>
-					</View>
-				) : (
-					<ScrollView
-						style={styles.companiesList}
-						contentContainerStyle={styles.companiesListContent}
-						refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[Colors.blue.DEFAULT]} />}
-					>
-						{companies.map((company) => (
-							<CompanyCard key={company.id} company={company} />
-						))}
-					</ScrollView>
-				)}
-
-				{/* Error Modal */}
-				{error && (
-					<Portal>
-						<Modal visible={!!error} onDismiss={() => setError("")} contentContainerStyle={styles.errorModal}>
-							<Text style={styles.errorText}>{error}</Text>
-							<Button mode="contained" onPress={() => setError("")} style={styles.errorButton}>
-								OK
-							</Button>
-						</Modal>
-					</Portal>
-				)}
+				{renderContent()}
+				{error && <ErrorModal error={error} onDismiss={() => setError("")} />}
 			</View>
 		</SafeAreaView>
 	)
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
 	safeArea: {
 		flex: 1,
 		backgroundColor: Colors.white,
 	},
-
 	companyCard: {
 		marginBottom: 12,
 		backgroundColor: Colors.white,
@@ -294,15 +334,6 @@ const styles = StyleSheet.create({
 		backgroundColor: Colors.blue.lightest,
 		elevation: 2,
 	},
-	filterSection: {
-		marginBottom: 8,
-	},
-	filterTitle: {
-		fontSize: 16,
-		fontWeight: "600",
-		color: Colors.dark_blue.DEFAULT,
-		marginBottom: 8,
-	},
 	serviceFiltersScroll: {
 		flexGrow: 0,
 	},
@@ -310,21 +341,6 @@ const styles = StyleSheet.create({
 		flexDirection: "row",
 		gap: 8,
 		paddingRight: 16,
-	},
-	ratingContainer: {
-		flexDirection: "row",
-		alignItems: "center",
-		marginRight: 16,
-		gap: 4,
-	},
-	ratingText: {
-		fontSize: 14,
-		fontWeight: "600",
-		color: Colors.dark_blue.DEFAULT,
-	},
-	reviewCount: {
-		fontSize: 12,
-		color: Colors.slate.DEFAULT,
 	},
 	loadingContainer: {
 		flex: 1,

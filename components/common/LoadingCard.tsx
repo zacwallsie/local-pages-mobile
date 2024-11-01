@@ -8,6 +8,9 @@ interface LoadingCardProps {
 	message?: string
 }
 
+/**
+ * Loading card indicator component
+ */
 export const LoadingCard: React.FC<LoadingCardProps> = ({ message = "Loading..." }) => (
 	<View style={styles.container}>
 		<Card style={styles.card}>

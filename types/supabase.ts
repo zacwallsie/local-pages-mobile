@@ -1,5 +1,3 @@
-// types/supabase.ts
-
 import { GeoJSON } from "geojson"
 import { Home, Briefcase, Heart, Car, Scissors, PawPrint, GraduationCap, Laptop, PartyPopper, SprayCan, Truck, Dumbbell } from "lucide-react-native"
 
@@ -202,19 +200,30 @@ export const ServiceCategory = {
 } as const
 
 /**
- * ServiceCategoryKey: Type representing the keys of the ServiceCategory object.
+ * Represents the keys of the ServiceCategory object, used for type-safe access to service categories.
  *
  * @typedef {keyof typeof ServiceCategory} ServiceCategoryKey
  */
 export type ServiceCategoryKey = keyof typeof ServiceCategory
 
 /**
- * ServiceCategoryInternalName: Type representing the internal names of ServiceCategory.
+ * Represents the internal names of service categories as used in the database and validation.
+ * This type ensures type-safe access to the standardized category names.
  *
  * @typedef {(typeof ServiceCategory)[ServiceCategoryKey]["internalName"]} ServiceCategoryInternalName
  */
 export type ServiceCategoryInternalName = (typeof ServiceCategory)[ServiceCategoryKey]["internalName"]
 
+/**
+ * Represents the parameters required for searching services within the application.
+ *
+ * @interface SearchParams
+ * @property {Object} location - The geographical coordinates for the search.
+ * @property {number} location.latitude - The latitude coordinate.
+ * @property {number} location.longitude - The longitude coordinate.
+ * @property {ServiceCategoryKey} service - The category of service to search for.
+ * @property {number} [radius] - Optional search radius in kilometers/miles.
+ */
 export interface SearchParams {
 	location: {
 		latitude: number

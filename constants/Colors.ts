@@ -1,5 +1,4 @@
 // constants/colors.ts
-
 export const Colors = {
 	white: "#FFFFFF",
 	offwhite: "#FBF7F5",

@@ -1,13 +1,14 @@
-// src/hooks/useRequiredAuth.ts
 import { useEffect } from "react"
 import { useRouter } from "expo-router"
 import { supabase } from "@/supabase"
 import { Href } from "expo-router"
 
 /**
- * Custom hook that enforces authentication requirement
- * Redirects to auth screen if user is not authenticated
- * @param redirectPath - Path to redirect unauthenticated users to
+ * Custom React hook that enforces authentication requirements for protected routes.
+ * Automatically redirects unauthenticated users to a specified path.
+ *
+ * @param {string} redirectPath - The path to redirect unauthenticated users to
+ * @default "/"
  */
 export const useRequiredAuth = (redirectPath: string = "/") => {
 	const router = useRouter()
@@ -15,6 +16,13 @@ export const useRequiredAuth = (redirectPath: string = "/") => {
 	useEffect(() => {
 		let isSubscribed = true
 
+		/**
+		 * Verifies the user's authentication status by checking their session.
+		 * Redirects to the specified path if no valid session is found.
+		 *
+		 * @returns {Promise<void>}
+		 * @throws Logs any authentication or session check errors to console
+		 */
 		const checkAuth = async () => {
 			try {
 				const { data, error } = await supabase.auth.getSession()
@@ -34,17 +42,26 @@ export const useRequiredAuth = (redirectPath: string = "/") => {
 			}
 		}
 
-		// Initial check
+		// Initial authentication check
 		checkAuth()
 
-		// Set up auth state listener
+		/**
+		 * Sets up a listener for authentication state changes.
+		 * Redirects to the specified path if the user becomes unauthenticated.
+		 */
 		const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
 			if (!session && isSubscribed) {
 				router.replace(redirectPath as Href)
 			}
 		})
 
-		// Cleanup function
+		/**
+		 * Cleanup function that runs on component unmount:
+		 * - Prevents state updates after unmount by setting isSubscribed to false
+		 * - Removes the authentication state change listener
+		 *
+		 * @returns {void}
+		 */
 		return () => {
 			isSubscribed = false
 			authListener.subscription.unsubscribe()

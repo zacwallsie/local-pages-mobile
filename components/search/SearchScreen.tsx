@@ -5,7 +5,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler"
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet"
 import { TextInput, Button, Text, Snackbar, List, Portal, Modal } from "react-native-paper"
 import { MaterialCommunityIcons } from "@expo/vector-icons"
-import { useSafeAreaInsets } from "react-native-safe-area-context"
 import * as Location from "expo-location"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import debounce from "lodash/debounce"
@@ -16,9 +15,9 @@ import { CustomMarker } from "./CustomMarker"
 import { ServiceCategory, ServiceCategoryKey, Company } from "@/types/supabase"
 import { CompanyList } from "@/components/search/CompaniesList"
 
-const { height: SCREEN_HEIGHT } = Dimensions.get("window")
-
 // Types and Interfaces
+type ServiceType = keyof typeof ServiceCategory
+
 interface Coordinates {
 	latitude: number
 	longitude: number
@@ -39,7 +38,14 @@ interface SearchHistory {
 	timestamp: number
 }
 
+interface SearchScreenProps {
+	onSearch?: (params: { address: string; service: ServiceCategoryKey; location: Coordinates; query?: string }) => Promise<void>
+	onCompanySearch: (params: { service: ServiceCategoryKey; location: Coordinates; radius?: number }) => Promise<Company[]>
+}
+
 // Constants
+const { height: SCREEN_HEIGHT } = Dimensions.get("window")
+
 const BRISBANE_REGION: Region = {
 	latitude: -27.4698,
 	longitude: 153.0251,
@@ -54,154 +60,157 @@ const BRISBANE_BOUNDS = {
 	west: 152.8,
 }
 
-type ServiceType = keyof typeof ServiceCategory
+// Pure Functions
+const isWithinBrisbaneBounds = (lat: number, lon: number): boolean =>
+	lat >= BRISBANE_BOUNDS.south && lat <= BRISBANE_BOUNDS.north && lon >= BRISBANE_BOUNDS.west && lon <= BRISBANE_BOUNDS.east
 
-interface SearchHistory {
-	id: string
-	address: string
-	service: ServiceType
-	location: Coordinates
-	timestamp: number
-}
+// Sub-Components
+const LoadingScreen: React.FC = () => (
+	<View style={styles.loadingContainer}>
+		<RNActivityIndicator size="large" color="#0000ff" />
+		<Text style={styles.loadingText}>Initializing map...</Text>
+	</View>
+)
 
-interface SearchScreenProps {
-	onSearch?: (params: { address: string; service: ServiceCategoryKey; location: Coordinates; query?: string }) => Promise<void>
-	onCompanySearch?: (params: { service: ServiceCategoryKey; location: Coordinates; radius?: number }) => Promise<Company[]>
-}
+const SearchResultsList: React.FC<{
+	results: NominatimResult[]
+	onSelect: (result: NominatimResult) => void
+}> = ({ results, onSelect }) => (
+	<View style={styles.searchResults}>
+		{results.map((result) => (
+			<List.Item
+				key={result.place_id}
+				title={result.display_name}
+				onPress={() => onSelect(result)}
+				style={styles.searchResultItem}
+				titleNumberOfLines={2}
+				titleStyle={styles.searchResultText}
+			/>
+		))}
+	</View>
+)
 
-function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
-	// State
-	const [selectedLocation, setSelectedLocation] = useState<Coordinates | null>(null)
-	const [address, setAddress] = useState<string>("")
+const HistoryModal: React.FC<{
+	visible: boolean
+	onDismiss: () => void
+	history: SearchHistory[]
+	onSelect: (item: SearchHistory) => void
+}> = ({ visible, onDismiss, history, onSelect }) => (
+	<Modal visible={visible} onDismiss={onDismiss} contentContainerStyle={styles.historyModal}>
+		<View style={styles.historyModalContainer}>
+			<View style={styles.historyHeader}>
+				<Text style={styles.historyTitle}>Recent Searches</Text>
+				<TouchableOpacity onPress={onDismiss} style={styles.closeButton}>
+					<MaterialCommunityIcons name="close" size={24} color={Colors.slate.DEFAULT} />
+				</TouchableOpacity>
+			</View>
+
+			<View style={styles.historyContent}>
+				{history.length === 0 ? (
+					<Text style={styles.noHistory}>No recent searches</Text>
+				) : (
+					<ScrollView style={styles.historyScroll} showsVerticalScrollIndicator={true} contentContainerStyle={styles.historyScrollContent}>
+						{history.map((item) => (
+							<TouchableOpacity key={item.id} style={styles.historyItem} onPress={() => onSelect(item)}>
+								<MaterialCommunityIcons name="map-marker" size={24} color={Colors.slate.DEFAULT} />
+								<View style={styles.historyItemContent}>
+									<Text numberOfLines={2} style={styles.historyAddress}>
+										{item.address}
+									</Text>
+									<Text style={styles.historyService}>{item.service}</Text>
+								</View>
+							</TouchableOpacity>
+						))}
+					</ScrollView>
+				)}
+			</View>
+		</View>
+	</Modal>
+)
+
+/**
+ * SearchScreen Component
+ * A complex search interface combining map selection, address search, and service selection.
+ */
+const SearchScreen: React.FC<SearchScreenProps> = ({ onSearch, onCompanySearch }) => {
+	// State Management
+	const [mapState, setMapState] = useState({
+		selectedLocation: null as Coordinates | null,
+		address: "",
+		searchQuery: "",
+		service: "" as ServiceType | "",
+	})
+
+	const [uiState, setUiState] = useState({
+		loading: false,
+		error: "",
+		locationPermission: false,
+		showSearchResults: false,
+		isInitializing: true,
+		isBottomSheetVisible: false,
+		showServiceSelector: false,
+		showHistory: false,
+		showCompanyResults: false,
+	})
+
 	const [searchResults, setSearchResults] = useState<NominatimResult[]>([])
-	const [searchQuery, setSearchQuery] = useState<string>("")
-	const [service, setService] = useState<ServiceType | "">("")
-	const [loading, setLoading] = useState<boolean>(false)
-	const [error, setError] = useState<string>("")
-	const [locationPermission, setLocationPermission] = useState<boolean>(false)
-	const [showSearchResults, setShowSearchResults] = useState<boolean>(false)
-	const [isInitializing, setIsInitializing] = useState(true)
-	const [isBottomSheetVisible, setIsBottomSheetVisible] = useState(false)
 	const [searchHistory, setSearchHistory] = useState<SearchHistory[]>([])
-	const [showServiceSelector, setShowServiceSelector] = useState(false)
-	const [showHistory, setShowHistory] = useState(false)
 	const [companySearchResults, setCompanySearchResults] = useState<Company[]>([])
-	const [showCompanyResults, setCompanyShowResults] = useState(false)
 
 	// Refs
 	const mapRef = useRef<MapView | null>(null)
 	const bottomSheetRef = useRef<BottomSheet | null>(null)
 	const snapPoints = ["40%"]
 
-	const requestLocationPermission = async (): Promise<void> => {
+	// Location Services
+	const requestLocationPermission = useCallback(async () => {
 		try {
-			// Check current permission status
 			let { status } = await Location.getForegroundPermissionsAsync()
 
-			// If we don't have permission, request it
 			if (status !== "granted") {
 				const { status: newStatus } = await Location.requestForegroundPermissionsAsync()
 				if (newStatus !== "granted") {
-					// If permission is denied, show error and center on Brisbane
-					setError("Location permission is required for better experience")
+					setUiState((prev) => ({
+						...prev,
+						error: "Location permission is required for better experience",
+					}))
 					mapRef.current?.animateToRegion(BRISBANE_REGION)
 					return
 				}
 				status = newStatus
 			}
 
-			setLocationPermission(true)
-			setLoading(true)
+			setUiState((prev) => ({ ...prev, locationPermission: true, loading: true }))
 
-			try {
-				const location = await Location.getCurrentPositionAsync({
-					accuracy: Location.Accuracy.Balanced,
-				})
+			const location = await Location.getCurrentPositionAsync({
+				accuracy: Location.Accuracy.Balanced,
+			})
 
-				const { latitude, longitude } = location.coords
+			const { latitude, longitude } = location.coords
 
-				if (isWithinBrisbaneBounds(latitude, longitude)) {
-					const newLocation: Coordinates = { latitude, longitude }
-					setSelectedLocation(newLocation)
-
-					mapRef.current?.animateToRegion({
-						...newLocation,
-						latitudeDelta: 0.0922,
-						longitudeDelta: 0.0421,
-					})
-
-					// Get address for the location
-					try {
-						const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
-							headers: {
-								"Accept-Language": "en",
-								"User-Agent": "LocalPagesApp/1.0",
-							},
-						})
-
-						if (!response.ok) {
-							throw new Error("Failed to get address details")
-						}
-
-						const data = await response.json()
-						if (data.display_name) {
-							setAddress(data.display_name)
-							setSearchQuery(data.display_name)
-							setIsBottomSheetVisible(true)
-							bottomSheetRef.current?.expand()
-						}
-					} catch (err) {
-						console.error("Error getting address for current location:", err)
-						setError("Unable to get address for current location")
-					}
-				} else {
-					setError("Your current location is outside Brisbane")
-					mapRef.current?.animateToRegion(BRISBANE_REGION)
-				}
-			} catch (locationError) {
-				console.error("Error getting current location:", locationError)
-				setError("Unable to get your current location. Please ensure location services are enabled.")
-
-				// If on iOS, provide a button to open settings
-				if (Platform.OS === "ios") {
-					setTimeout(() => {
-						setError("Please enable location services in Settings to use your current location")
-					}, 3000)
-					Linking.openSettings()
-				}
-
+			if (isWithinBrisbaneBounds(latitude, longitude)) {
+				await handleLocationUpdate({ latitude, longitude })
+			} else {
+				setUiState((prev) => ({
+					...prev,
+					error: "Your current location is outside Brisbane",
+				}))
 				mapRef.current?.animateToRegion(BRISBANE_REGION)
 			}
 		} catch (err) {
-			console.warn("Error with location permissions:", err)
-			setError("Unable to access location services")
+			console.error("Location permission error:", err)
+			setUiState((prev) => ({
+				...prev,
+				error: "Unable to access location services",
+			}))
 			mapRef.current?.animateToRegion(BRISBANE_REGION)
 		} finally {
-			setLoading(false)
+			setUiState((prev) => ({ ...prev, loading: false }))
 		}
-	}
-
-	// Enhanced initialization effect
-	useEffect(() => {
-		const initialize = async () => {
-			try {
-				await Promise.all([requestLocationPermission(), loadSearchHistory()])
-			} catch (err) {
-				console.error("Initialization error:", err)
-				setError("Failed to initialize app")
-			} finally {
-				setIsInitializing(false)
-			}
-		}
-
-		initialize()
 	}, [])
 
-	const isWithinBrisbaneBounds = (lat: number, lon: number): boolean => {
-		return lat >= BRISBANE_BOUNDS.south && lat <= BRISBANE_BOUNDS.north && lon >= BRISBANE_BOUNDS.west && lon <= BRISBANE_BOUNDS.east
-	}
-
-	const loadSearchHistory = async () => {
+	// History Management
+	const loadSearchHistory = useCallback(async () => {
 		try {
 			const history = await AsyncStorage.getItem("searchHistory")
 			if (history) {
@@ -209,100 +218,87 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 			}
 		} catch (err) {
 			console.error("Error loading search history:", err)
-			setError("Failed to load search history")
+			setUiState((prev) => ({
+				...prev,
+				error: "Failed to load search history",
+			}))
 		}
-	}
-
-	const saveToHistory = async (searchData: Omit<SearchHistory, "id" | "timestamp">) => {
-		try {
-			const newHistory: SearchHistory = {
-				...searchData,
-				id: Math.random().toString(36).substr(2, 9),
-				timestamp: Date.now(),
-			}
-
-			const updatedHistory = [newHistory, ...searchHistory.slice(0, 9)]
-			await AsyncStorage.setItem("searchHistory", JSON.stringify(updatedHistory))
-			setSearchHistory(updatedHistory)
-		} catch (err) {
-			console.error("Error saving search history:", err)
-			setError("Failed to save to history")
-		}
-	}
-
-	// Event Handlers
-	const showBottomSheet = useCallback(() => {
-		setIsBottomSheetVisible(true)
-		bottomSheetRef.current?.expand()
 	}, [])
 
-	const searchAddress = debounce(async (query: string): Promise<void> => {
-		if (query.length < 3) {
-			setSearchResults([])
-			return
-		}
-
-		try {
-			setLoading(true)
-			const response = await fetch(
-				`https://nominatim.openstreetmap.org/search?` +
-					`format=json&q=${encodeURIComponent(query)}&` +
-					`viewbox=${BRISBANE_BOUNDS.west},${BRISBANE_BOUNDS.south},${BRISBANE_BOUNDS.east},${BRISBANE_BOUNDS.north}&` +
-					`bounded=1&countrycodes=au&limit=5`,
-				{
-					headers: {
-						"Accept-Language": "en",
-						"User-Agent": "LocalPagesApp/1.0",
-					},
+	const saveToHistory = useCallback(
+		async (searchData: Omit<SearchHistory, "id" | "timestamp">) => {
+			try {
+				const newHistory: SearchHistory = {
+					...searchData,
+					id: Math.random().toString(36).substr(2, 9),
+					timestamp: Date.now(),
 				}
-			)
 
-			if (!response.ok) {
-				throw new Error("Failed to fetch address results")
+				const updatedHistory = [newHistory, ...searchHistory.slice(0, 9)]
+				await AsyncStorage.setItem("searchHistory", JSON.stringify(updatedHistory))
+				setSearchHistory(updatedHistory)
+			} catch (err) {
+				console.error("Error saving search history:", err)
+				setUiState((prev) => ({ ...prev, error: "Failed to save to history" }))
+			}
+		},
+		[searchHistory]
+	)
+
+	// Search Handlers
+	const searchAddress = useCallback(
+		debounce(async (query: string): Promise<void> => {
+			if (query.length < 3) {
+				setSearchResults([])
+				return
 			}
 
-			const data: NominatimResult[] = await response.json()
-			setSearchResults(data)
-			setShowSearchResults(true)
-		} catch (err) {
-			console.error("Error searching address:", err)
-			setError("Error searching for address")
-		} finally {
-			setLoading(false)
-		}
-	}, 500)
+			try {
+				setUiState((prev) => ({ ...prev, loading: true }))
 
-	const handleLocationSelect = async (result: NominatimResult): Promise<void> => {
-		const newLocation: Coordinates = {
-			latitude: parseFloat(result.lat),
-			longitude: parseFloat(result.lon),
-		}
+				const response = await fetch(
+					`https://nominatim.openstreetmap.org/search?` +
+						`format=json&q=${encodeURIComponent(query)}&` +
+						`viewbox=${BRISBANE_BOUNDS.west},${BRISBANE_BOUNDS.south},` +
+						`${BRISBANE_BOUNDS.east},${BRISBANE_BOUNDS.north}&` +
+						`bounded=1&countrycodes=au&limit=5`,
+					{
+						headers: {
+							"Accept-Language": "en",
+							"User-Agent": "LocalPagesApp/1.0",
+						},
+					}
+				)
 
-		setSelectedLocation(newLocation)
-		setAddress(result.display_name)
-		setSearchQuery(result.display_name)
-		setShowSearchResults(false)
+				if (!response.ok) throw new Error("Failed to fetch address results")
 
-		mapRef.current?.animateToRegion({
-			...newLocation,
-			latitudeDelta: 0.0922,
-			longitudeDelta: 0.0421,
-		})
+				const data: NominatimResult[] = await response.json()
+				setSearchResults(data)
+				setUiState((prev) => ({ ...prev, showSearchResults: true }))
+			} catch (err) {
+				console.error("Error searching address:", err)
+				setUiState((prev) => ({
+					...prev,
+					error: "Error searching for address",
+				}))
+			} finally {
+				setUiState((prev) => ({ ...prev, loading: false }))
+			}
+		}, 500),
+		[]
+	)
 
-		showBottomSheet()
-	}
-
-	const handleMapPress = async (event: MapPressEvent): Promise<void> => {
-		const coordinate = event.nativeEvent.coordinate
-		if (!isWithinBrisbaneBounds(coordinate.latitude, coordinate.longitude)) {
-			setError("Please select a location within Brisbane")
-			return
-		}
-
-		setSelectedLocation(coordinate)
-		setLoading(true)
-
+	// Location Update Handler
+	const handleLocationUpdate = async (coordinate: Coordinates) => {
 		try {
+			setMapState((prev) => ({ ...prev, selectedLocation: coordinate }))
+
+			mapRef.current?.animateToRegion({
+				...coordinate,
+				latitudeDelta: 0.0922,
+				longitudeDelta: 0.0421,
+			})
+
 			const response = await fetch(
 				`https://nominatim.openstreetmap.org/reverse?` + `format=json&lat=${coordinate.latitude}&lon=${coordinate.longitude}`,
 				{
@@ -313,122 +309,105 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 				}
 			)
 
-			if (!response.ok) {
-				throw new Error("Failed to get address details")
-			}
+			if (!response.ok) throw new Error("Failed to get address details")
 
 			const data = await response.json()
 			if (data.display_name) {
-				setAddress(data.display_name)
-				setSearchQuery(data.display_name)
-				showBottomSheet()
+				setMapState((prev) => ({
+					...prev,
+					address: data.display_name,
+					searchQuery: data.display_name,
+				}))
+				setUiState((prev) => ({ ...prev, isBottomSheetVisible: true }))
+				bottomSheetRef.current?.expand()
 			}
 		} catch (err) {
-			console.error("Error reverse geocoding:", err)
-			setError("Error getting address details")
-		} finally {
-			setLoading(false)
+			console.error("Error updating location:", err)
+			setUiState((prev) => ({
+				...prev,
+				error: "Error getting address details",
+			}))
 		}
 	}
 
-	const handleHistorySelect = (historyItem: SearchHistory) => {
-		setSelectedLocation(historyItem.location)
-		setAddress(historyItem.address)
-		setService(historyItem.service)
-		mapRef.current?.animateToRegion({
-			...historyItem.location,
-			latitudeDelta: 0.0922,
-			longitudeDelta: 0.0421,
-		})
-		showBottomSheet()
-		setShowHistory(false)
+	// Event Handlers
+	const handleMapPress = (event: MapPressEvent) => {
+		const coordinate = event.nativeEvent.coordinate
+		if (!isWithinBrisbaneBounds(coordinate.latitude, coordinate.longitude)) {
+			setUiState((prev) => ({
+				...prev,
+				error: "Please select a location within Brisbane",
+			}))
+			return
+		}
+		handleLocationUpdate(coordinate)
 	}
 
-	const handleSearch = async (): Promise<void> => {
-		if (!selectedLocation || !service) {
-			setError("Please select both location and service")
+	const handleCompanySearch = async () => {
+		if (!mapState.selectedLocation || !mapState.service) {
+			setUiState((prev) => ({
+				...prev,
+				error: "Please select both location and service",
+			}))
 			return
 		}
 
-		setLoading(true)
-		setError("")
+		setUiState((prev) => ({ ...prev, loading: true }))
 
 		try {
-			await onSearch?.({
-				address,
-				service,
-				location: selectedLocation,
-				query: searchQuery,
+			const companies = await onCompanySearch({
+				service: mapState.service as ServiceCategoryKey,
+				location: mapState.selectedLocation,
+				radius: 0,
 			})
 
-			await saveToHistory({
-				address,
-				service,
-				location: selectedLocation,
-			})
-		} catch (err) {
-			setError(err instanceof Error ? err.message : "An error occurred during search")
-		} finally {
-			setLoading(false)
-		}
-	}
-
-	const handleCompanySearch = async (): Promise<void> => {
-		if (!selectedLocation || !service) {
-			setError("Please select both location and service")
-			return
-		}
-
-		setLoading(true)
-		try {
-			console.log("Searching for companies with params:", {
-				service,
-				location: selectedLocation,
-				radius: 10,
-			})
-
-			const companies = await onCompanySearch?.({
-				service: service as ServiceCategoryKey,
-				location: selectedLocation,
-				radius: 10,
-			})
-
-			console.log("Search results:", companies) // Debug log
-
-			if (!companies?.length) {
-				setError("No companies found in this area")
+			if (!companies || companies.length === 0) {
+				setUiState((prev) => ({
+					...prev,
+					error: "No companies found in this area",
+					showCompanyResults: false,
+				}))
+				setCompanySearchResults([])
 				return
 			}
 
-			console.log(`Found ${companies.length} companies in the area`)
-
-			// Save to search history
 			await saveToHistory({
-				address,
-				service: service as ServiceCategoryKey,
-				location: selectedLocation,
+				address: mapState.address,
+				service: mapState.service as ServiceCategoryKey,
+				location: mapState.selectedLocation,
 			})
 
-			// Set results and show the list
 			setCompanySearchResults(companies)
-			setCompanyShowResults(true)
+			setUiState((prev) => ({ ...prev, showCompanyResults: true }))
 		} catch (err) {
 			console.error("Search error:", err)
-			setError(err instanceof Error ? err.message : "Error searching for companies")
+			setUiState((prev) => ({
+				...prev,
+				error: err instanceof Error ? err.message : "Error searching for companies",
+			}))
+			setCompanySearchResults([])
 		} finally {
-			setLoading(false)
+			setUiState((prev) => ({ ...prev, loading: false }))
 		}
 	}
 
-	// Loading Screen
-	if (isInitializing) {
-		return (
-			<View style={styles.loadingContainer}>
-				<RNActivityIndicator size="large" color="#0000ff" />
-				<Text style={styles.loadingText}>Initializing map...</Text>
-			</View>
-		)
-	}
+	// Effects
+	useEffect(() => {
+		const initialize = async () => {
+			try {
+				await Promise.all([requestLocationPermission(), loadSearchHistory()])
+			} catch (err) {
+				console.error("Initialization error:", err)
+				setUiState((prev) => ({ ...prev, error: "Failed to initialize app" }))
+			} finally {
+				setUiState((prev) => ({ ...prev, isInitializing: false }))
+			}
+		}
+
+		initialize()
+	}, [])
+
+	if (uiState.isInitializing) return <LoadingScreen />
 
 	return (
 		<ErrorBoundary>
@@ -439,18 +418,17 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 						style={styles.map}
 						initialRegion={BRISBANE_REGION}
 						onPress={handleMapPress}
-						showsUserLocation={locationPermission}
-						showsMyLocationButton={locationPermission}
+						showsUserLocation={uiState.locationPermission}
+						showsMyLocationButton={uiState.locationPermission}
 					>
-						{selectedLocation && (
-							<Marker coordinate={selectedLocation} tracksViewChanges={false}>
+						{mapState.selectedLocation && (
+							<Marker coordinate={mapState.selectedLocation} tracksViewChanges={false}>
 								<CustomMarker size={40} />
 							</Marker>
 						)}
 					</MapView>
 
-					{/* Bottom Sheet */}
-					{isBottomSheetVisible && (
+					{uiState.isBottomSheetVisible && (
 						<BottomSheet
 							ref={bottomSheetRef}
 							snapPoints={snapPoints}
@@ -460,57 +438,84 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 							handleIndicatorStyle={styles.bottomSheetIndicator}
 						>
 							<BottomSheetView style={styles.bottomSheetContent}>
-								{/* Search Container moved inside bottom sheet */}
 								<View style={styles.searchSection}>
 									<View style={styles.searchRow}>
 										<TextInput
 											mode="outlined"
 											placeholder="Search for an address in Brisbane"
-											value={searchQuery}
+											value={mapState.searchQuery}
 											onChangeText={(text) => {
-												setSearchQuery(text)
+												setMapState((prev) => ({
+													...prev,
+													searchQuery: text,
+												}))
 												searchAddress(text)
 											}}
-											right={loading ? <TextInput.Icon icon="loading" /> : null}
+											right={uiState.loading ? <TextInput.Icon icon="loading" /> : null}
 											style={styles.searchInput}
 										/>
-										<TouchableOpacity style={styles.historyButton} onPress={() => setShowHistory(true)}>
+										<TouchableOpacity
+											style={styles.historyButton}
+											onPress={() =>
+												setUiState((prev) => ({
+													...prev,
+													showHistory: true,
+												}))
+											}
+										>
 											<MaterialCommunityIcons name="history" size={24} color={Colors.blue.DEFAULT} />
 										</TouchableOpacity>
 									</View>
 
-									{showSearchResults && searchResults.length > 0 && (
-										<View style={styles.searchResults}>
-											{searchResults.map((result) => (
-												<List.Item
-													key={result.place_id}
-													title={result.display_name}
-													onPress={() => handleLocationSelect(result)}
-													style={styles.searchResultItem}
-													titleNumberOfLines={2}
-													titleStyle={styles.searchResultText}
-												/>
-											))}
-										</View>
+									{uiState.showSearchResults && searchResults.length > 0 && (
+										<SearchResultsList
+											results={searchResults}
+											onSelect={(result) => {
+												const newLocation = {
+													latitude: parseFloat(result.lat),
+													longitude: parseFloat(result.lon),
+												}
+												handleLocationUpdate(newLocation)
+												setUiState((prev) => ({
+													...prev,
+													showSearchResults: false,
+												}))
+											}}
+										/>
 									)}
 								</View>
 
 								<View style={styles.divider} />
 
 								<ServiceSelector
-									value={service}
-									onSelect={(value) => setService(value)}
-									visible={showServiceSelector}
-									onDismiss={() => setShowServiceSelector(false)}
-									onShow={() => setShowServiceSelector(true)}
+									value={mapState.service}
+									onSelect={(value) =>
+										setMapState((prev) => ({
+											...prev,
+											service: value,
+										}))
+									}
+									visible={uiState.showServiceSelector}
+									onDismiss={() =>
+										setUiState((prev) => ({
+											...prev,
+											showServiceSelector: false,
+										}))
+									}
+									onShow={() =>
+										setUiState((prev) => ({
+											...prev,
+											showServiceSelector: true,
+										}))
+									}
 								/>
 
 								<View style={styles.buttonContainer}>
 									<Button
 										mode="contained"
 										onPress={handleCompanySearch}
-										loading={loading}
-										disabled={loading || !address || !service}
+										loading={uiState.loading}
+										disabled={uiState.loading || !mapState.address || !mapState.service}
 										style={styles.primaryButton}
 										icon="magnify"
 									>
@@ -519,9 +524,24 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 
 									<Button
 										mode="outlined"
-										onPress={handleSearch}
-										loading={loading}
-										disabled={loading || !address || !service}
+										onPress={async () => {
+											if (!mapState.selectedLocation || !mapState.service) {
+												setUiState((prev) => ({
+													...prev,
+													error: "Please select both location and service",
+												}))
+												return
+											}
+
+											await onSearch?.({
+												address: mapState.address,
+												service: mapState.service as ServiceCategoryKey,
+												location: mapState.selectedLocation,
+												query: mapState.searchQuery,
+											})
+										}}
+										loading={uiState.loading}
+										disabled={uiState.loading || !mapState.address || !mapState.service}
 										style={styles.secondaryButton}
 									>
 										Save Location
@@ -531,78 +551,79 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 						</BottomSheet>
 					)}
 
-					{/* History Modal */}
-					<Portal>
-						<Modal visible={showHistory} onDismiss={() => setShowHistory(false)} contentContainerStyle={styles.historyModal}>
-							<View style={styles.historyModalContainer}>
-								<View style={styles.historyHeader}>
-									<Text style={styles.historyTitle}>Recent Searches</Text>
-									<TouchableOpacity onPress={() => setShowHistory(false)} style={styles.closeButton}>
-										<MaterialCommunityIcons name="close" size={24} color={Colors.slate.DEFAULT} />
-									</TouchableOpacity>
-								</View>
+					<HistoryModal
+						visible={uiState.showHistory}
+						onDismiss={() =>
+							setUiState((prev) => ({
+								...prev,
+								showHistory: false,
+							}))
+						}
+						history={searchHistory}
+						onSelect={(historyItem) => {
+							setMapState({
+								selectedLocation: historyItem.location,
+								address: historyItem.address,
+								searchQuery: historyItem.address,
+								service: historyItem.service,
+							})
+							mapRef.current?.animateToRegion({
+								...historyItem.location,
+								latitudeDelta: 0.0922,
+								longitudeDelta: 0.0421,
+							})
+							setUiState((prev) => ({
+								...prev,
+								isBottomSheetVisible: true,
+								showHistory: false,
+							}))
+						}}
+					/>
 
-								<View style={styles.historyContent}>
-									{searchHistory.length === 0 ? (
-										<Text style={styles.noHistory}>No recent searches</Text>
-									) : (
-										<ScrollView
-											style={styles.historyScroll}
-											showsVerticalScrollIndicator={true}
-											contentContainerStyle={styles.historyScrollContent}
-										>
-											{searchHistory.map((item) => (
-												<TouchableOpacity key={item.id} style={styles.historyItem} onPress={() => handleHistorySelect(item)}>
-													<MaterialCommunityIcons name="map-marker" size={24} color={Colors.slate.DEFAULT} />
-													<View style={styles.historyItemContent}>
-														<Text numberOfLines={2} style={styles.historyAddress}>
-															{item.address}
-														</Text>
-														<Text style={styles.historyService}>{item.service}</Text>
-													</View>
-												</TouchableOpacity>
-											))}
-										</ScrollView>
-									)}
-								</View>
-							</View>
-						</Modal>
-					</Portal>
-
-					{/* Loading Modal */}
-					{loading && (
+					{uiState.loading && (
 						<Portal>
-							<Modal visible={loading} dismissable={false} contentContainerStyle={styles.loadingModal}>
+							<Modal visible={uiState.loading} dismissable={false} contentContainerStyle={styles.loadingModal}>
 								<RNActivityIndicator size="large" color="#0000ff" />
 							</Modal>
 						</Portal>
 					)}
 
-					{/* Company Results Modal */}
-					{showCompanyResults && (
+					{uiState.showCompanyResults && (
 						<Portal>
 							<Modal
-								visible={showCompanyResults}
-								onDismiss={() => setCompanyShowResults(false)}
+								visible={uiState.showCompanyResults}
+								onDismiss={() =>
+									setUiState((prev) => ({
+										...prev,
+										showCompanyResults: false,
+									}))
+								}
 								contentContainerStyle={styles.resultsModal}
 								dismissable={true}
 							>
-								<CompanyList companies={companySearchResults} onClose={() => setCompanyShowResults(false)} />
+								<CompanyList
+									companies={companySearchResults}
+									onClose={() =>
+										setUiState((prev) => ({
+											...prev,
+											showCompanyResults: false,
+										}))
+									}
+								/>
 							</Modal>
 						</Portal>
 					)}
 
-					{/* Error Snackbar */}
 					<Snackbar
-						visible={!!error}
-						onDismiss={() => setError("")}
+						visible={!!uiState.error}
+						onDismiss={() => setUiState((prev) => ({ ...prev, error: "" }))}
 						duration={3000}
 						action={{
 							label: "OK",
-							onPress: () => setError(""),
+							onPress: () => setUiState((prev) => ({ ...prev, error: "" })),
 						}}
 					>
-						{error}
+						{uiState.error}
 					</Snackbar>
 				</View>
 			</GestureHandlerRootView>
@@ -610,6 +631,7 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 	)
 }
 
+// Styles
 const styles = StyleSheet.create({
 	historyModal: {
 		margin: 20,

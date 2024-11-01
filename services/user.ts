@@ -1,13 +1,27 @@
-// src/services/user.ts
 import { supabase } from "@/supabase"
-import { MobileUser, UserProfile } from "@/types/user"
+import { UserProfile } from "@/types/user"
 
+/**
+ * Response interface for profile operations
+ */
 interface ProfileResponse {
+	/** Indicates if the profile operation was successful */
 	success: boolean
+	/** Error message if operation failed */
 	error?: string
 }
 
+/**
+ * Service for managing user profile operations in Supabase
+ */
 export const userService = {
+	/**
+	 * Creates a new mobile user profile in the database
+	 * @param {string} userId - User's authentication ID
+	 * @param {string} email - User's email address
+	 * @param {UserProfile} profile - User's profile information
+	 * @returns {Promise<ProfileResponse>} Result of profile creation
+	 */
 	async createMobileUser(userId: string, email: string, profile: UserProfile): Promise<ProfileResponse> {
 		try {
 			const { error } = await supabase.from("mobile_user").insert([
@@ -29,8 +43,11 @@ export const userService = {
 			}
 		}
 	},
+
 	/**
-	 * Checks if a mobile user profile exists for the given user ID
+	 * Verifies existence of a mobile user profile
+	 * @param {string} userId - User's authentication ID
+	 * @returns {Promise<boolean>} True if profile exists, false otherwise
 	 */
 	async checkMobileUserExists(userId: string): Promise<boolean> {
 		try {

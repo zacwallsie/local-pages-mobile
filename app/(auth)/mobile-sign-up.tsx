@@ -2,7 +2,7 @@
 import React from "react"
 import { View, StyleSheet } from "react-native"
 import { useRouter } from "expo-router"
-import { TextInput, Button, Text, HelperText, Card } from "react-native-paper"
+import { Button, Text, HelperText, Card } from "react-native-paper"
 import { Colors } from "@/constants/Colors"
 import { LoadingCard } from "@/components/common/LoadingCard"
 import { useAuthUser } from "@/hooks/useAuthUser"

@@ -1,3 +1,4 @@
+// companies.tsx
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import CompanyListScreen from "@/components/companies/CompaniesListScreen"
 

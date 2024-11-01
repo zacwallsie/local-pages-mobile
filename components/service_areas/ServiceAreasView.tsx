@@ -2,14 +2,12 @@ import React, { useState, useRef } from "react"
 import { View, StyleSheet, Dimensions, ActivityIndicator, Image, TouchableOpacity } from "react-native"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import MapView, { Geojson } from "react-native-maps"
-import { Text, Portal, Modal, Card, Button, IconButton } from "react-native-paper"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { MaterialCommunityIcons } from "@expo/vector-icons"
-import { router } from "expo-router"
 import { ServiceSelector } from "@/components/common/ServiceSelector"
 import { Colors } from "@/constants/Colors"
 import { ServiceCategoryKey, Company, ServiceArea } from "@/types/supabase"
 import { fetchServiceAreas } from "@/utils/fetchServiceAreas"
+import { ServiceAreaPopover } from "./ServiceAreaPopover"
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window")
 
@@ -29,61 +27,10 @@ interface ServiceAreaWithCompany extends ServiceArea {
 	company: Company
 }
 
-const ServiceAreaPopover = ({ company, onClose }: { company: Company; onClose: () => void }) => {
-	const handleViewCompany = () => {
-		// First close the popover
-		onClose()
-
-		// Then navigate to company details
-		setTimeout(() => {
-			router.push({
-				pathname: "/companies/[id]",
-				params: { id: company.id, company: JSON.stringify(company) },
-			})
-		}, 100)
-	}
-
-	return (
-		<Card style={styles.popoverCard}>
-			<Card.Content style={styles.popoverContent}>
-				<View style={styles.popoverHeader}>
-					<Text variant="titleMedium" style={styles.companyName}>
-						Service Area Details
-					</Text>
-					<IconButton icon="close" size={24} onPress={onClose} style={styles.closeButton} />
-				</View>
-
-				<View style={styles.companyDetails}>
-					<View style={styles.logoContainer}>
-						{company.logo ? (
-							<Image source={{ uri: company.logo }} style={styles.logo} resizeMode="cover" />
-						) : (
-							<View style={styles.placeholderLogo}>
-								<MaterialCommunityIcons name="domain" size={30} color={Colors.blue.DEFAULT} />
-							</View>
-						)}
-					</View>
-
-					<View style={styles.infoContainer}>
-						<Text variant="titleMedium" style={styles.companyName}>
-							{company.company_name}
-						</Text>
-						{company.description && (
-							<Text variant="bodySmall" style={styles.description} numberOfLines={2}>
-								{company.description}
-							</Text>
-						)}
-					</View>
-				</View>
-
-				<Button mode="contained" onPress={handleViewCompany} style={styles.viewButton}>
-					View Company Details
-				</Button>
-			</Card.Content>
-		</Card>
-	)
-}
-
+/**
+ * Main component for displaying service areas on a map
+ * Handles service selection, area display, and company details
+ */
 const ServiceAreasView = ({ onServiceSelect }: ServiceAreasViewProps) => {
 	const insets = useSafeAreaInsets()
 	const mapRef = useRef<MapView | null>(null)
