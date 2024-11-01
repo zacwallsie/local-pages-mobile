@@ -1,31 +1,33 @@
-// app/auth/sign-up.tsx
-
-import React, { useState } from "react"
+// src/screens/SignUpScreen.tsx
+import React from "react"
 import { View, StyleSheet } from "react-native"
-import { supabase } from "../../supabase"
-import { Link, useRouter } from "expo-router"
-import { TextInput, Button, Text, HelperText, Card } from "react-native-paper"
+import { useRouter } from "expo-router"
+import { Button, Text, Card } from "react-native-paper"
 import { Colors } from "@/constants/Colors"
+import { FormInput } from "@/components/auth/FormInput"
+import { useSignUpForm } from "@/hooks/useSignUpForm"
+import { authService } from "@/services/auth"
 
 export default function SignUpScreen() {
-	const [email, setEmail] = useState("")
-	const [password, setPassword] = useState("")
-	const [loading, setLoading] = useState(false)
-	const [error, setError] = useState("")
 	const router = useRouter()
+	const { formData, loading, errors, updateField, isValid } = useSignUpForm()
 
 	const handleSignUp = async () => {
-		setLoading(true)
-		setError("")
-		const { error } = await supabase.auth.signUp({ email, password })
-		if (error) {
-			setError(error.message)
-		} else {
-			alert("Check your email for the confirmation link!")
-			router.replace("/")
+		try {
+			const response = await authService.signUp(formData)
+
+			if (response.success) {
+				alert("Check your email for the confirmation link!")
+				router.replace("/")
+			} else {
+				alert(response.error)
+			}
+		} catch (error) {
+			alert("An unexpected error occurred")
 		}
-		setLoading(false)
 	}
+
+	const getFieldError = (field: string) => errors.find((error) => error.field === field)?.message
 
 	return (
 		<View style={styles.container}>
@@ -34,23 +36,48 @@ export default function SignUpScreen() {
 					<Text variant="headlineMedium" style={styles.title}>
 						Create Account
 					</Text>
-					<TextInput
+
+					<View style={styles.nameContainer}>
+						<FormInput
+							label="First Name"
+							value={formData.firstName}
+							onChangeText={(value) => updateField("firstName", value)}
+							style={[styles.nameInput]}
+							error={getFieldError("firstName")}
+						/>
+						<View style={styles.inputSpacing} />
+						<FormInput
+							label="Last Name"
+							value={formData.lastName}
+							onChangeText={(value) => updateField("lastName", value)}
+							style={[styles.nameInput]}
+							error={getFieldError("lastName")}
+						/>
+					</View>
+
+					<FormInput
 						label="Email"
-						value={email}
-						onChangeText={setEmail}
+						value={formData.email}
+						onChangeText={(value) => updateField("email", value)}
 						autoCapitalize="none"
 						keyboardType="email-address"
-						style={styles.input}
-						mode="outlined"
+						error={getFieldError("email")}
 					/>
-					<TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry style={styles.input} mode="outlined" />
-					{error ? <HelperText type="error">{error}</HelperText> : null}
+
+					<FormInput
+						label="Password"
+						value={formData.password}
+						onChangeText={(value) => updateField("password", value)}
+						secureTextEntry
+						error={getFieldError("password")}
+					/>
+
 					<Button
 						mode="contained"
 						onPress={handleSignUp}
 						style={styles.button}
 						loading={loading}
-						disabled={loading}
+						disabled={loading || !isValid}
 						contentStyle={styles.buttonContent}
 					>
 						Sign Up
@@ -86,6 +113,17 @@ const styles = StyleSheet.create({
 		marginBottom: 24,
 		color: Colors.dark_blue.DEFAULT,
 		fontWeight: "bold",
+	},
+	nameContainer: {
+		flexDirection: "row",
+		marginBottom: 16,
+	},
+	nameInput: {
+		flex: 1,
+		marginBottom: 0,
+	},
+	inputSpacing: {
+		width: 12,
 	},
 	input: {
 		marginBottom: 16,

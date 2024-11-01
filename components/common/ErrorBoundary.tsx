@@ -1,3 +1,4 @@
+// /components/shared/ErrorBoundary.tsx
 import React, { Component, ErrorInfo, ReactNode } from "react"
 import { View, StyleSheet } from "react-native"
 import { Button, Text } from "react-native-paper"

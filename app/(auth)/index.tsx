@@ -1,33 +1,16 @@
-// app/auth/sign-in.tsx
-
-import React, { useState } from "react"
+import React from "react"
 import { View, StyleSheet } from "react-native"
-import { supabase } from "../../supabase"
-import { Link, useRouter } from "expo-router"
+import { useRouter } from "expo-router"
 import { TextInput, Button, Text, HelperText, Card } from "react-native-paper"
 import { Colors } from "@/constants/Colors"
+import { useSignInForm } from "@/hooks/useSignInForm"
 
+/**
+ * Screen component for user sign in
+ */
 export default function SignInScreen() {
-	const [email, setEmail] = useState("")
-	const [password, setPassword] = useState("")
 	const router = useRouter()
-	const [loading, setLoading] = useState(false)
-	const [error, setError] = useState("")
-
-	const handleSignIn = async () => {
-		setLoading(true)
-		setError("")
-		const { data, error } = await supabase.auth.signInWithPassword({
-			email,
-			password,
-		})
-		if (error) {
-			setError(error.message)
-		} else {
-			router.replace("/search")
-		}
-		setLoading(false)
-	}
+	const { credentials, loading, error, updateField, handleSignIn } = useSignInForm()
 
 	return (
 		<View style={styles.container}>
@@ -36,23 +19,36 @@ export default function SignInScreen() {
 					<Text variant="headlineMedium" style={styles.title}>
 						Welcome Back
 					</Text>
+
 					<TextInput
 						label="Email"
-						value={email}
-						onChangeText={setEmail}
+						value={credentials.email}
+						onChangeText={(value) => updateField("email", value)}
 						autoCapitalize="none"
 						keyboardType="email-address"
 						style={styles.input}
 						mode="outlined"
+						error={!!error}
 					/>
-					<TextInput label="Password" value={password} onChangeText={setPassword} secureTextEntry style={styles.input} mode="outlined" />
+
+					<TextInput
+						label="Password"
+						value={credentials.password}
+						onChangeText={(value) => updateField("password", value)}
+						secureTextEntry
+						style={styles.input}
+						mode="outlined"
+						error={!!error}
+					/>
+
 					{error ? <HelperText type="error">{error}</HelperText> : null}
+
 					<Button
 						mode="contained"
 						onPress={handleSignIn}
 						style={styles.button}
 						loading={loading}
-						disabled={loading}
+						disabled={loading || !credentials.email || !credentials.password}
 						contentStyle={styles.buttonContent}
 					>
 						Sign In

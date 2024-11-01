@@ -206,7 +206,7 @@ export const ServiceCategory = {
  *
  * @typedef {keyof typeof ServiceCategory} ServiceCategoryKey
  */
-type ServiceCategoryKey = keyof typeof ServiceCategory
+export type ServiceCategoryKey = keyof typeof ServiceCategory
 
 /**
  * ServiceCategoryInternalName: Type representing the internal names of ServiceCategory.
@@ -214,3 +214,12 @@ type ServiceCategoryKey = keyof typeof ServiceCategory
  * @typedef {(typeof ServiceCategory)[ServiceCategoryKey]["internalName"]} ServiceCategoryInternalName
  */
 export type ServiceCategoryInternalName = (typeof ServiceCategory)[ServiceCategoryKey]["internalName"]
+
+export interface SearchParams {
+	location: {
+		latitude: number
+		longitude: number
+	}
+	service: ServiceCategoryKey
+	radius?: number
+}

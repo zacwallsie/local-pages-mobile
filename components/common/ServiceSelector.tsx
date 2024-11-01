@@ -1,5 +1,5 @@
 import React from "react"
-import { View, StyleSheet, TouchableOpacity, ScrollView } from "react-native"
+import { View, StyleSheet, TouchableOpacity, ScrollView, ViewStyle, StyleProp } from "react-native"
 import { Text, Portal, Modal } from "react-native-paper"
 import { MaterialCommunityIcons } from "@expo/vector-icons"
 import { Colors } from "@/constants/Colors"
@@ -13,9 +13,11 @@ interface ServiceSelectorProps {
 	visible: boolean
 	onDismiss: () => void
 	onShow: () => void
+	style?: StyleProp<ViewStyle>
+	buttonStyle?: StyleProp<ViewStyle>
 }
 
-export const ServiceSelector = ({ value, onSelect, visible, onDismiss, onShow }: ServiceSelectorProps) => {
+export const ServiceSelector = ({ value, onSelect, visible, onDismiss, onShow, style, buttonStyle }: ServiceSelectorProps) => {
 	const getServiceIcon = (service: ServiceType | ""): string => {
 		const icons: Record<ServiceType, string> = {
 			HOME_SERVICES: "home",
@@ -40,8 +42,8 @@ export const ServiceSelector = ({ value, onSelect, visible, onDismiss, onShow }:
 	}
 
 	return (
-		<View style={selectorStyles.selector}>
-			<TouchableOpacity onPress={onShow} style={selectorStyles.selectorButton}>
+		<View style={[selectorStyles.selector, style]}>
+			<TouchableOpacity onPress={onShow} style={[selectorStyles.selectorButton, buttonStyle]}>
 				<View style={selectorStyles.selectorLeft}>
 					<MaterialCommunityIcons
 						name={value ? (getServiceIcon(value) as keyof typeof MaterialCommunityIcons.glyphMap) : "tools"}
@@ -137,7 +139,7 @@ const selectorStyles = StyleSheet.create({
 		color: Colors.dark_blue.DEFAULT,
 	},
 	scrollView: {
-		maxHeight: 400, // Set a maximum height for the scrollable area
+		maxHeight: 400,
 	},
 	scrollViewContent: {
 		padding: 16,

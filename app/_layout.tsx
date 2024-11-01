@@ -1,72 +1,31 @@
 // app/_layout.tsx
-
+import React from "react"
 import { Slot } from "expo-router"
-import { useEffect, useState } from "react"
-import { ActivityIndicator, View } from "react-native"
-import { Provider as PaperProvider, DefaultTheme } from "react-native-paper"
+import { Provider as PaperProvider } from "react-native-paper"
 import { SafeAreaProvider } from "react-native-safe-area-context"
-import { Session } from "@supabase/supabase-js"
-import { supabase } from "../supabase"
-import { Colors } from "@/constants/Colors"
+import { theme } from "@/theme/theme"
+import { useAuthSession } from "@/hooks/useAuthSession"
+import { LoadingScreen } from "@/components/common/LoadingScreen"
+import { ErrorBoundary } from "@/components/common/ErrorBoundary"
 
-// Define theme once outside the component
-const theme = {
-	...DefaultTheme,
-	colors: {
-		...DefaultTheme.colors,
-		primary: Colors.blue.DEFAULT,
-		accent: Colors.red.DEFAULT,
-		background: Colors.offwhite,
-		surface: Colors.white,
-		text: Colors.darks.dark,
-		placeholder: Colors.slate.light,
-	},
-}
-
+/**
+ * Root layout component that provides theme, authentication, and error handling
+ * throughout the application
+ */
 export default function RootLayout() {
-	const [session, setSession] = useState<Session | null>(null)
-	const [loading, setLoading] = useState(true)
+	const { loading, error } = useAuthSession()
 
-	useEffect(() => {
-		const getInitialSession = async () => {
-			try {
-				const { data } = await supabase.auth.getSession()
-				setSession(data.session)
-			} catch (error) {
-				console.error("Error getting session:", error)
-			} finally {
-				setLoading(false)
-			}
-		}
-
-		getInitialSession()
-
-		const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-			setSession(session)
-		})
-
-		return () => {
-			authListener.subscription.unsubscribe()
-		}
-	}, [])
-
-	if (loading) {
+	if (error) {
 		return (
-			<PaperProvider theme={theme}>
-				<SafeAreaProvider>
-					<View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-						<ActivityIndicator size="large" color={theme.colors.primary} />
-					</View>
-				</SafeAreaProvider>
-			</PaperProvider>
+			<ErrorBoundary>
+				<div>Error: {error.message}</div>
+			</ErrorBoundary>
 		)
 	}
 
 	return (
 		<PaperProvider theme={theme}>
-			<SafeAreaProvider>
-				<Slot />
-			</SafeAreaProvider>
+			<SafeAreaProvider>{loading ? <LoadingScreen /> : <Slot />}</SafeAreaProvider>
 		</PaperProvider>
 	)
 }

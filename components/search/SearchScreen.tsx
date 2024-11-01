@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react"
-import { View, StyleSheet, Dimensions, ActivityIndicator as RNActivityIndicator, TouchableOpacity } from "react-native"
+import { View, StyleSheet, Dimensions, ActivityIndicator as RNActivityIndicator, TouchableOpacity, ScrollView, Linking, Platform } from "react-native"
 import MapView, { Marker, Region, MapPressEvent } from "react-native-maps"
 import { GestureHandlerRootView } from "react-native-gesture-handler"
 import BottomSheet, { BottomSheetView } from "@gorhom/bottom-sheet"
@@ -9,11 +9,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context"
 import * as Location from "expo-location"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import debounce from "lodash/debounce"
-import { ErrorBoundary } from "../utils/ErrorBoundary"
-import { ServiceSelector } from "./ServiceSelector"
+import { ErrorBoundary } from "../common/ErrorBoundary"
+import { ServiceSelector } from "../common/ServiceSelector"
 import { Colors } from "@/constants/Colors"
 import { CustomMarker } from "./CustomMarker"
-import { ServiceCategory } from "@/types/supabase"
+import { ServiceCategory, ServiceCategoryKey, Company } from "@/types/supabase"
+import { CompanyList } from "@/components/search/CompaniesList"
+
+const { height: SCREEN_HEIGHT } = Dimensions.get("window")
 
 // Types and Interfaces
 interface Coordinates {
@@ -62,12 +65,8 @@ interface SearchHistory {
 }
 
 interface SearchScreenProps {
-	onSearch?: (params: { address: string; service: ServiceType; location: Coordinates; query?: string }) => Promise<void>
-	onCompanySearch?: (params: { service: ServiceType; location: Coordinates; radius?: number }) => Promise<void>
-}
-interface SearchScreenProps {
-	onSearch?: (params: { address: string; service: ServiceType; location: Coordinates; query?: string }) => Promise<void>
-	onCompanySearch?: (params: { service: ServiceType; location: Coordinates; radius?: number }) => Promise<void>
+	onSearch?: (params: { address: string; service: ServiceCategoryKey; location: Coordinates; query?: string }) => Promise<void>
+	onCompanySearch?: (params: { service: ServiceCategoryKey; location: Coordinates; radius?: number }) => Promise<Company[]>
 }
 
 function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
@@ -86,26 +85,42 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 	const [searchHistory, setSearchHistory] = useState<SearchHistory[]>([])
 	const [showServiceSelector, setShowServiceSelector] = useState(false)
 	const [showHistory, setShowHistory] = useState(false)
+	const [companySearchResults, setCompanySearchResults] = useState<Company[]>([])
+	const [showCompanyResults, setCompanyShowResults] = useState(false)
 
 	// Refs
 	const mapRef = useRef<MapView | null>(null)
 	const bottomSheetRef = useRef<BottomSheet | null>(null)
 	const snapPoints = ["40%"]
-	const insets = useSafeAreaInsets()
 
-	// Enhanced Helper Functions
 	const requestLocationPermission = async (): Promise<void> => {
 		try {
-			const { status } = await Location.requestForegroundPermissionsAsync()
-			setLocationPermission(status === "granted")
+			// Check current permission status
+			let { status } = await Location.getForegroundPermissionsAsync()
 
-			if (status === "granted") {
-				setLoading(true)
-				const location = await Location.getCurrentPositionAsync({})
+			// If we don't have permission, request it
+			if (status !== "granted") {
+				const { status: newStatus } = await Location.requestForegroundPermissionsAsync()
+				if (newStatus !== "granted") {
+					// If permission is denied, show error and center on Brisbane
+					setError("Location permission is required for better experience")
+					mapRef.current?.animateToRegion(BRISBANE_REGION)
+					return
+				}
+				status = newStatus
+			}
+
+			setLocationPermission(true)
+			setLoading(true)
+
+			try {
+				const location = await Location.getCurrentPositionAsync({
+					accuracy: Location.Accuracy.Balanced,
+				})
+
 				const { latitude, longitude } = location.coords
 
 				if (isWithinBrisbaneBounds(latitude, longitude)) {
-					// Set the location and update map
 					const newLocation: Coordinates = { latitude, longitude }
 					setSelectedLocation(newLocation)
 
@@ -117,15 +132,12 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 
 					// Get address for the location
 					try {
-						const response = await fetch(
-							`https://nominatim.openstreetmap.org/reverse?` + `format=json&lat=${latitude}&lon=${longitude}`,
-							{
-								headers: {
-									"Accept-Language": "en",
-									"User-Agent": "LocalPagesApp/1.0",
-								},
-							}
-						)
+						const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+							headers: {
+								"Accept-Language": "en",
+								"User-Agent": "LocalPagesApp/1.0",
+							},
+						})
 
 						if (!response.ok) {
 							throw new Error("Failed to get address details")
@@ -144,17 +156,25 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 					}
 				} else {
 					setError("Your current location is outside Brisbane")
-					// Set to Brisbane center as fallback
 					mapRef.current?.animateToRegion(BRISBANE_REGION)
 				}
-			} else {
-				// If permission denied, center on Brisbane
+			} catch (locationError) {
+				console.error("Error getting current location:", locationError)
+				setError("Unable to get your current location. Please ensure location services are enabled.")
+
+				// If on iOS, provide a button to open settings
+				if (Platform.OS === "ios") {
+					setTimeout(() => {
+						setError("Please enable location services in Settings to use your current location")
+					}, 3000)
+					Linking.openSettings()
+				}
+
 				mapRef.current?.animateToRegion(BRISBANE_REGION)
 			}
 		} catch (err) {
-			console.warn("Error getting location:", err)
+			console.warn("Error with location permissions:", err)
 			setError("Unable to access location services")
-			// Set to Brisbane center as fallback
 			mapRef.current?.animateToRegion(BRISBANE_REGION)
 		} finally {
 			setLoading(false)
@@ -361,12 +381,39 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 
 		setLoading(true)
 		try {
-			await onCompanySearch?.({
+			console.log("Searching for companies with params:", {
 				service,
 				location: selectedLocation,
-				radius: 10, // 10km radius
+				radius: 10,
 			})
+
+			const companies = await onCompanySearch?.({
+				service: service as ServiceCategoryKey,
+				location: selectedLocation,
+				radius: 10,
+			})
+
+			console.log("Search results:", companies) // Debug log
+
+			if (!companies?.length) {
+				setError("No companies found in this area")
+				return
+			}
+
+			console.log(`Found ${companies.length} companies in the area`)
+
+			// Save to search history
+			await saveToHistory({
+				address,
+				service: service as ServiceCategoryKey,
+				location: selectedLocation,
+			})
+
+			// Set results and show the list
+			setCompanySearchResults(companies)
+			setCompanyShowResults(true)
 		} catch (err) {
+			console.error("Search error:", err)
 			setError(err instanceof Error ? err.message : "Error searching for companies")
 		} finally {
 			setLoading(false)
@@ -487,22 +534,38 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 					{/* History Modal */}
 					<Portal>
 						<Modal visible={showHistory} onDismiss={() => setShowHistory(false)} contentContainerStyle={styles.historyModal}>
-							<Text style={styles.historyTitle}>Recent Searches</Text>
-							{searchHistory.length === 0 ? (
-								<Text style={styles.noHistory}>No recent searches</Text>
-							) : (
-								searchHistory.map((item) => (
-									<TouchableOpacity key={item.id} style={styles.historyItem} onPress={() => handleHistorySelect(item)}>
-										<MaterialCommunityIcons name="map-marker" size={24} color="#666" />
-										<View style={styles.historyItemContent}>
-											<Text numberOfLines={1} style={styles.historyAddress}>
-												{item.address}
-											</Text>
-											<Text style={styles.historyService}>{item.service}</Text>
-										</View>
+							<View style={styles.historyModalContainer}>
+								<View style={styles.historyHeader}>
+									<Text style={styles.historyTitle}>Recent Searches</Text>
+									<TouchableOpacity onPress={() => setShowHistory(false)} style={styles.closeButton}>
+										<MaterialCommunityIcons name="close" size={24} color={Colors.slate.DEFAULT} />
 									</TouchableOpacity>
-								))
-							)}
+								</View>
+
+								<View style={styles.historyContent}>
+									{searchHistory.length === 0 ? (
+										<Text style={styles.noHistory}>No recent searches</Text>
+									) : (
+										<ScrollView
+											style={styles.historyScroll}
+											showsVerticalScrollIndicator={true}
+											contentContainerStyle={styles.historyScrollContent}
+										>
+											{searchHistory.map((item) => (
+												<TouchableOpacity key={item.id} style={styles.historyItem} onPress={() => handleHistorySelect(item)}>
+													<MaterialCommunityIcons name="map-marker" size={24} color={Colors.slate.DEFAULT} />
+													<View style={styles.historyItemContent}>
+														<Text numberOfLines={2} style={styles.historyAddress}>
+															{item.address}
+														</Text>
+														<Text style={styles.historyService}>{item.service}</Text>
+													</View>
+												</TouchableOpacity>
+											))}
+										</ScrollView>
+									)}
+								</View>
+							</View>
 						</Modal>
 					</Portal>
 
@@ -511,7 +574,20 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 						<Portal>
 							<Modal visible={loading} dismissable={false} contentContainerStyle={styles.loadingModal}>
 								<RNActivityIndicator size="large" color="#0000ff" />
-								<Text style={styles.loadingText}>Loading...</Text>
+							</Modal>
+						</Portal>
+					)}
+
+					{/* Company Results Modal */}
+					{showCompanyResults && (
+						<Portal>
+							<Modal
+								visible={showCompanyResults}
+								onDismiss={() => setCompanyShowResults(false)}
+								contentContainerStyle={styles.resultsModal}
+								dismissable={true}
+							>
+								<CompanyList companies={companySearchResults} onClose={() => setCompanyShowResults(false)} />
 							</Modal>
 						</Portal>
 					)}
@@ -535,6 +611,75 @@ function SearchScreen({ onSearch, onCompanySearch }: SearchScreenProps) {
 }
 
 const styles = StyleSheet.create({
+	historyModal: {
+		margin: 20,
+		maxHeight: "80%",
+		width: "90%",
+		alignSelf: "center",
+	},
+	historyModalContainer: {
+		backgroundColor: Colors.white,
+		borderRadius: 8,
+		elevation: 5,
+		shadowColor: Colors.darks.darkest,
+		shadowOffset: {
+			width: 0,
+			height: 2,
+		},
+		shadowOpacity: 0.25,
+		shadowRadius: 3.84,
+	},
+	historyHeader: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		alignItems: "center",
+		padding: 16,
+		borderBottomWidth: 1,
+		borderBottomColor: Colors.blue.lightest,
+	},
+	historyTitle: {
+		fontSize: 20,
+		fontWeight: "bold",
+		color: Colors.dark_blue.DEFAULT,
+	},
+	closeButton: {
+		padding: 4,
+	},
+	historyContent: {
+		maxHeight: "80%",
+	},
+	historyScroll: {
+		flexGrow: 0,
+	},
+	historyScrollContent: {
+		flexGrow: 1,
+	},
+	noHistory: {
+		textAlign: "center",
+		color: Colors.slate.DEFAULT,
+		padding: 20,
+	},
+	historyItem: {
+		flexDirection: "row",
+		alignItems: "flex-start",
+		padding: 16,
+		borderBottomWidth: 1,
+		borderBottomColor: Colors.blue.lightest,
+	},
+	historyItemContent: {
+		marginLeft: 12,
+		flex: 1,
+	},
+	historyAddress: {
+		fontSize: 16,
+		color: Colors.dark_blue.DEFAULT,
+		lineHeight: 22,
+	},
+	historyService: {
+		fontSize: 14,
+		color: Colors.slate.DEFAULT,
+		marginTop: 4,
+	},
 	searchSection: {
 		marginBottom: 16,
 	},
@@ -579,12 +724,23 @@ const styles = StyleSheet.create({
 		flex: 1,
 		justifyContent: "center",
 		alignItems: "center",
-		backgroundColor: Colors.white,
+		backgroundColor: "transparent",
+	},
+	loadingModal: {
+		backgroundColor: "rgba(255, 255, 255, 0.8)",
+		padding: 20,
+		borderRadius: 60,
+		alignItems: "center",
+		alignSelf: "center",
+		width: 80,
+		height: 80,
+		justifyContent: "center",
 	},
 	loadingText: {
 		marginTop: 10,
-		fontSize: 16,
+		fontSize: 14,
 		color: Colors.dark_blue.DEFAULT,
+		textAlign: "center",
 	},
 	map: {
 		width: Dimensions.get("window").width,
@@ -632,44 +788,6 @@ const styles = StyleSheet.create({
 		color: Colors.dark_blue.DEFAULT,
 		lineHeight: 20,
 	},
-	historyModal: {
-		backgroundColor: Colors.white,
-		margin: 20,
-		padding: 20,
-		borderRadius: 8,
-		maxHeight: "80%",
-	},
-	historyTitle: {
-		fontSize: 20,
-		fontWeight: "bold",
-		color: Colors.dark_blue.DEFAULT,
-		marginBottom: 16,
-	},
-	noHistory: {
-		textAlign: "center",
-		color: Colors.slate.DEFAULT,
-		marginTop: 20,
-	},
-	historyItem: {
-		flexDirection: "row",
-		alignItems: "center",
-		padding: 12,
-		borderBottomWidth: 1,
-		borderBottomColor: Colors.blue.lightest,
-	},
-	historyItemContent: {
-		marginLeft: 12,
-		flex: 1,
-	},
-	historyAddress: {
-		fontSize: 16,
-		color: Colors.dark_blue.DEFAULT,
-	},
-	historyService: {
-		fontSize: 14,
-		color: Colors.slate.DEFAULT,
-		marginTop: 4,
-	},
 	bottomSheet: {
 		backgroundColor: Colors.white,
 		shadowColor: Colors.darks.darkest,
@@ -702,12 +820,16 @@ const styles = StyleSheet.create({
 	searchButton: {
 		backgroundColor: Colors.blue.dark,
 	},
-	loadingModal: {
-		backgroundColor: Colors.white,
-		padding: 20,
-		margin: 40,
-		borderRadius: 8,
-		alignItems: "center",
+	resultsModal: {
+		position: "absolute",
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		backgroundColor: "white",
+		margin: 0,
+		padding: 0,
+		height: SCREEN_HEIGHT,
 	},
 })
 
